@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { FaUser, FaSearch, FaEnvelope, FaHome, FaBars, FaTimes } from 'react-icons/fa';
 
 const Navbar = () => {
-  const { user, profile, signOut } = useAuth();
+  const { profile, signOut } = useAuth();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 

@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 
 const Home: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { profile } = useAuth();
   const [recentProfiles, setRecentProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
