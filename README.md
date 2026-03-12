@@ -1,4 +1,4 @@
-# Hostel Connect
+ # Hostel Connect
 
 A platform for hostel residents to connect, interact, and network, breaking the barrier between seniors and juniors.
 
