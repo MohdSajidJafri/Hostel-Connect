@@ -1,77 +1,166 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { format } from 'date-fns';
+import { 
+  Pencil, 
+  Briefcase, 
+  Home as HomeIcon, 
+  Mail, 
+  Phone, 
+  Calendar
+} from 'lucide-react';
 
 const Profile: React.FC = () => {
   const { profile, user } = useAuth();
-  
+
   if (!profile || !user) {
     return (
-      <div className="container mx-auto p-4 text-center">
-        <p>Loading profile...</p>
+      <div className="p-16 text-center flex flex-col items-center justify-center gap-3">
+        <div className="w-5 h-5 border-2 border-neutral-300 border-t-neutral-900 rounded-full animate-spin" />
+        <span className="text-xs text-neutral-500">Loading profile...</span>
       </div>
     );
   }
-  
+
+  // Format creation date
+  const memberSince = profile.created_at
+    ? format(new Date(profile.created_at), 'MMMM yyyy')
+    : 'Recently';
+
   return (
-    <div className="container mx-auto p-4 max-w-4xl animate-in fade-in duration-500">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Your Profile</h1>
-        <Link to="/profile/edit" className="btn btn-primary flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-          Edit Profile
+    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight text-neutral-950">
+          Profile
+        </h1>
+        <Link
+          to="/profile/edit"
+          className="btn btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+          title="Edit Profile"
+        >
+          <Pencil size={13} />
+          <span>Edit Profile</span>
         </Link>
       </div>
-      
-      <div className="card p-8 mb-6 bg-gradient-to-br from-white to-slate-50 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-primary-100 rounded-full mix-blend-multiply filter blur-3xl opacity-50 translate-x-1/2 -translate-y-1/2"></div>
-        <div className="flex flex-col md:flex-row items-center md:items-start gap-8 relative z-10">
-          <div className="w-32 h-32 md:w-40 md:h-40 bg-gradient-to-br from-primary-100 to-primary-200 rounded-full flex items-center justify-center text-primary-700 overflow-hidden shadow-inner border-4 border-white flex-shrink-0">
+
+      {/* Identity Card */}
+      <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden shadow-subtle">
+        {/* Architectural Subtle Cover Surface */}
+        <div className="h-28 bg-neutral-100 border-b border-neutral-200 relative">
+          <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] opacity-60" />
+        </div>
+
+        {/* Identity Details */}
+        <div className="px-6 pb-6 pt-0 text-center relative">
+          {/* Centered Avatar */}
+          <div className="w-20 h-20 rounded-full bg-white border-4 border-white shadow-subtle overflow-hidden mx-auto -mt-10 flex items-center justify-center text-base font-semibold text-neutral-800 relative z-10">
             {profile.avatar_url ? (
-              <img 
-                src={profile.avatar_url} 
-                alt={profile.full_name || 'Profile'} 
+              <img
+                src={profile.avatar_url}
+                alt={profile.full_name || 'Profile'}
                 className="w-full h-full object-cover"
               />
             ) : (
-              <span className="text-4xl font-bold">
-                {profile.full_name ? profile.full_name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : 'U'}
+              <span>
+                {profile.full_name ? profile.full_name.charAt(0).toUpperCase() : 'U'}
               </span>
             )}
           </div>
-          
-          <div className="flex-1 text-center md:text-left mt-2">
-            <h2 className="text-3xl font-bold text-slate-900 mb-2">{profile.full_name || 'No Name Set'}</h2>
-            <div className="inline-flex items-center gap-2 bg-white px-4 py-2 rounded-lg border border-slate-200 shadow-sm text-slate-700 font-medium mb-4">
-              <svg className="w-5 h-5 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 14l9-5-9-5-9 5 9 5zm0 0v6"></path></svg>
-              {profile.domain ? `${profile.domain}` : 'No course/program set'}
-              {profile.year_of_study ? <span className="text-slate-400 font-normal">| Year {profile.year_of_study}</span> : ''}
+
+          <div className="mt-3 space-y-1">
+            <h2 className="text-lg font-bold text-neutral-950 tracking-tight">
+              {profile.full_name || 'Resident Name'}
+            </h2>
+
+            <div className="flex flex-wrap items-center justify-center gap-1.5 text-xs text-neutral-500">
+              {profile.domain && <span>• {profile.domain}</span>}
+              {profile.year_of_study && <span>• Year {profile.year_of_study}</span>}
+              <span className="text-neutral-400">• Active</span>
             </div>
+
+            <p className="text-xs text-neutral-500 italic pt-2 max-w-md mx-auto">
+              "Building, learning and growing together."
+            </p>
           </div>
         </div>
-      </div>
-      
-      <div className="card p-8">
-        <h2 className="text-xl font-bold mb-6 text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-4">
-          <svg className="w-5 h-5 text-primary-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-          Profile Details
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-slate-50 p-5 rounded-xl border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Area of Expertise</h3>
-            <p className="text-slate-900 font-medium text-lg">{profile.expertise || 'Not specified'}</p>
+
+        {/* Structured Details Section */}
+        <div className="border-t border-neutral-100 p-6 space-y-4">
+          {/* Area of Expertise */}
+          <div className="flex items-start gap-3.5">
+            <div className="w-8 h-8 rounded-md bg-neutral-100 flex items-center justify-center text-neutral-700 flex-shrink-0">
+              <Briefcase size={15} />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                Expertise
+              </div>
+              <div className="text-xs font-medium text-neutral-900">
+                {profile.expertise || 'Not specified'}
+              </div>
+            </div>
           </div>
-          <div className="bg-slate-50 p-5 rounded-xl border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Room Number</h3>
-            <p className="text-slate-900 font-medium text-lg">{profile.room_number || 'Not specified'}</p>
+
+          {/* Room Number */}
+          <div className="flex items-start gap-3.5">
+            <div className="w-8 h-8 rounded-md bg-neutral-100 flex items-center justify-center text-neutral-700 flex-shrink-0">
+              <HomeIcon size={15} />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                Room Number
+              </div>
+              <div className="text-xs font-mono font-medium text-neutral-900">
+                {profile.room_number || 'Not specified'}
+              </div>
+            </div>
           </div>
-          <div className="bg-slate-50 p-5 rounded-xl border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Contact Info</h3>
-            <p className="text-slate-900 font-medium text-lg">{profile.contact_info || 'Not specified'}</p>
+
+          {/* Email */}
+          <div className="flex items-start gap-3.5">
+            <div className="w-8 h-8 rounded-md bg-neutral-100 flex items-center justify-center text-neutral-700 flex-shrink-0">
+              <Mail size={15} />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                Email
+              </div>
+              <div className="text-xs font-medium text-neutral-900 truncate">
+                {user.email || 'Not available'}
+              </div>
+            </div>
           </div>
-          <div className="bg-slate-50 p-5 rounded-xl border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Email</h3>
-            <p className="text-slate-900 font-medium text-lg">{user.email || 'Not available'}</p>
+
+          {/* Contact (WhatsApp) */}
+          <div className="flex items-start gap-3.5">
+            <div className="w-8 h-8 rounded-md bg-neutral-100 flex items-center justify-center text-neutral-700 flex-shrink-0">
+              <Phone size={15} />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                Contact (WhatsApp)
+              </div>
+              <div className="text-xs font-medium text-neutral-900">
+                {profile.contact_info || 'Not specified'}
+              </div>
+            </div>
+          </div>
+
+          {/* Member Since */}
+          <div className="flex items-start gap-3.5">
+            <div className="w-8 h-8 rounded-md bg-neutral-100 flex items-center justify-center text-neutral-700 flex-shrink-0">
+              <Calendar size={15} />
+            </div>
+            <div className="space-y-0.5 min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                Member since
+              </div>
+              <div className="text-xs font-medium text-neutral-900">
+                {memberSince}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -80,3 +169,4 @@ const Profile: React.FC = () => {
 };
 
 export default Profile;
+

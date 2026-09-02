@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { ArrowLeft, Upload, ChevronDown } from 'lucide-react';
 
 const EditProfile: React.FC = () => {
   const navigate = useNavigate();
@@ -10,7 +11,9 @@ const EditProfile: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [avatar, setAvatar] = useState<File | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
   // Form state
   const [formData, setFormData] = useState({
     fullName: '',
@@ -18,9 +21,9 @@ const EditProfile: React.FC = () => {
     yearOfStudy: '',
     expertise: '',
     roomNumber: '',
-    contactInfo: ''
+    contactInfo: '',
   });
-  
+
   useEffect(() => {
     if (profile) {
       setFormData({
@@ -29,89 +32,91 @@ const EditProfile: React.FC = () => {
         yearOfStudy: profile.year_of_study?.toString() || '',
         expertise: profile.expertise || '',
         roomNumber: profile.room_number || '',
-        contactInfo: profile.contact_info || ''
+        contactInfo: profile.contact_info || '',
       });
-      
+
       if (profile.avatar_url) {
         setAvatarUrl(profile.avatar_url);
       }
     }
   }, [profile]);
-  
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+
+  const handleChange = (
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >
+  ) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
-  
+
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       if (file.size > 2 * 1024 * 1024) {
-        alert('File size must be less than 2MB');
+        setErrorMsg('File size must be less than 2MB');
         return;
       }
       setAvatar(file);
       setAvatarUrl(URL.createObjectURL(file));
+      setErrorMsg(null);
     }
   };
-  
+
   const uploadAvatar = async (): Promise<string | null> => {
     if (!avatar || !user) return null;
-    
+
     try {
       setUploading(true);
-      
+
       const fileExt = avatar.name.split('.').pop();
       const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      // Upload directly to the bucket root instead of avatars subfolder
       const filePath = fileName;
-      
+
       const { error: uploadError } = await supabase.storage
         .from('profiles')
         .upload(filePath, avatar);
-        
-      if (uploadError) {
-        throw uploadError;
-      }
-      
-      const { data } = supabase.storage
-        .from('profiles')
-        .getPublicUrl(filePath);
-        
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('profiles').getPublicUrl(filePath);
       return data.publicUrl;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading avatar:', error);
-      alert('Error uploading avatar.');
+      setErrorMsg('Error uploading avatar: ' + (error.message || ''));
       return null;
     } finally {
       setUploading(false);
     }
   };
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!user) {
-      alert('You must be logged in to update your profile');
+      setErrorMsg('You must be signed in to update your profile.');
       return;
     }
-    
+
     try {
       setLoading(true);
-      
+      setErrorMsg(null);
+      setSuccessMsg(null);
+
       // Upload avatar if changed
       let newAvatarUrl = profile?.avatar_url || null;
       if (avatar) {
         newAvatarUrl = await uploadAvatar();
       }
-      
+
       // Convert year of study to number if provided
-      const yearOfStudy = formData.yearOfStudy ? parseInt(formData.yearOfStudy) : null;
-      
+      const yearOfStudy = formData.yearOfStudy
+        ? parseInt(formData.yearOfStudy)
+        : null;
+
       // Update profile
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
+      const { error } = await supabase.from('profiles').upsert(
+        {
           user_id: user.id,
           full_name: formData.fullName,
           domain: formData.course,
@@ -120,106 +125,151 @@ const EditProfile: React.FC = () => {
           room_number: formData.roomNumber,
           contact_info: formData.contactInfo,
           avatar_url: newAvatarUrl,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
-        });
-        
-      if (error) {
-        throw error;
-      }
-      
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'user_id',
+        }
+      );
+
+      if (error) throw error;
+
       await refreshProfile();
-      alert('Profile updated successfully!');
-      navigate('/profile');
-    } catch (error) {
+      setSuccessMsg('Profile updated successfully!');
+      setTimeout(() => {
+        navigate('/profile');
+      }, 600);
+    } catch (error: any) {
       console.error('Error updating profile:', error);
-      alert('Error updating profile. Please try again.');
+      setErrorMsg('Error updating profile: ' + (error.message || ''));
     } finally {
       setLoading(false);
     }
   };
-  
+
   return (
-    <div className="container mx-auto p-4 max-w-3xl animate-in fade-in duration-500">
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate('/profile')} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
-          <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => navigate('/profile')}
+          className="p-1.5 -ml-1 text-neutral-500 hover:text-neutral-950 hover:bg-neutral-100 rounded-md transition-colors"
+          title="Back to profile"
+        >
+          <ArrowLeft size={18} />
         </button>
-        <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Edit Profile</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-neutral-950">
+          Edit Profile
+        </h1>
       </div>
-      
-      <form onSubmit={handleSubmit} className="card p-8">
-        {/* Profile Photo */}
-        <div className="mb-8 pb-8 border-b border-slate-100">
-          <label className="block mb-4 font-semibold text-slate-900">Profile Photo</label>
-          <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6">
-            <div className="w-32 h-32 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full overflow-hidden flex items-center justify-center shadow-inner border-4 border-white flex-shrink-0">
+
+      {/* Messages */}
+      {errorMsg && (
+        <div className="p-3 bg-neutral-50 border border-neutral-300 rounded-md text-xs text-neutral-800">
+          {errorMsg}
+        </div>
+      )}
+      {successMsg && (
+        <div className="p-3 bg-neutral-50 border border-neutral-300 rounded-md text-xs text-neutral-900 font-medium">
+          {successMsg}
+        </div>
+      )}
+
+      {/* Form Container */}
+      <form onSubmit={handleSubmit} className="bg-white border border-neutral-200 rounded-xl p-6 sm:p-8 space-y-8 shadow-subtle">
+        {/* Profile Photo Section */}
+        <div>
+          <label className="block text-xs font-semibold text-neutral-900 uppercase tracking-wider mb-3">
+            Profile Photo
+          </label>
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-sm font-semibold text-neutral-800 flex-shrink-0">
               {avatarUrl ? (
-                <img 
-                  src={avatarUrl} 
-                  alt="Profile" 
+                <img
+                  src={avatarUrl}
+                  alt="Profile"
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <svg className="w-12 h-12 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                <span>
+                  {formData.fullName ? formData.fullName.charAt(0).toUpperCase() : 'U'}
+                </span>
               )}
             </div>
-            <div className="flex flex-col items-center sm:items-start gap-2 pt-2">
-              <label className="btn btn-secondary cursor-pointer">
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                Upload New Photo
-                <input 
-                  type="file" 
+
+            <div className="space-y-1">
+              <label className="btn btn-secondary text-xs py-1.5 px-3 cursor-pointer inline-flex items-center gap-1.5">
+                <Upload size={13} />
+                <span>Change Photo</span>
+                <input
+                  type="file"
                   accept="image/*"
-                  className="hidden" 
+                  className="hidden"
                   onChange={handleAvatarChange}
                   disabled={uploading}
                 />
               </label>
-              <p className="text-sm text-slate-500">JPG, PNG or GIF. Max size 2MB.</p>
+              <p className="text-[11px] text-neutral-400">
+                JPG, PNG or GIF. Max size 2MB.
+              </p>
             </div>
           </div>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+
+        {/* 2-Column Form Fields */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5 pt-4 border-t border-neutral-100">
           {/* Full Name */}
-          <div className="space-y-1">
-            <label htmlFor="fullName" className="block font-medium text-slate-700">Full Name</label>
-            <input 
-              type="text" 
+          <div className="space-y-1.5">
+            <label
+              htmlFor="fullName"
+              className="block text-xs font-medium text-neutral-700"
+            >
+              Full Name
+            </label>
+            <input
+              type="text"
               id="fullName"
               name="fullName"
-              className="input" 
+              className="input text-xs"
               value={formData.fullName}
               onChange={handleChange}
-              placeholder="John Doe"
+              placeholder="e.g. Mohd Sajid Jafri"
               required
             />
           </div>
-          
-          {/* Course/Domain */}
-          <div className="space-y-1">
-            <label htmlFor="course" className="block font-medium text-slate-700">Course/Program</label>
-            <input 
-              type="text" 
+
+          {/* Course/Program */}
+          <div className="space-y-1.5">
+            <label
+              htmlFor="course"
+              className="block text-xs font-medium text-neutral-700"
+            >
+              Course / Program
+            </label>
+            <input
+              type="text"
               id="course"
               name="course"
-              className="input" 
+              className="input text-xs"
               value={formData.course}
               onChange={handleChange}
-              placeholder="e.g., Computer Science"
+              placeholder="e.g. B.Tech CSE"
             />
           </div>
-          
+
           {/* Year of Study */}
-          <div className="space-y-1">
-            <label htmlFor="yearOfStudy" className="block font-medium text-slate-700">Year of Study</label>
+          <div className="space-y-1.5">
+            <label
+              htmlFor="yearOfStudy"
+              className="block text-xs font-medium text-neutral-700"
+            >
+              Year of Study
+            </label>
             <div className="relative">
               <select
                 id="yearOfStudy"
                 name="yearOfStudy"
-                className="input appearance-none"
+                className="input text-xs appearance-none pr-8 cursor-pointer"
                 value={formData.yearOfStudy}
                 onChange={handleChange}
               >
@@ -230,76 +280,94 @@ const EditProfile: React.FC = () => {
                 <option value="4">4th Year</option>
                 <option value="5">5th Year</option>
               </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-              </div>
+              <ChevronDown
+                size={14}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+              />
             </div>
           </div>
-          
+
           {/* Area of Expertise */}
-          <div className="space-y-1">
-            <label htmlFor="expertise" className="block font-medium text-slate-700">Area of Expertise</label>
-            <input 
-              type="text" 
+          <div className="space-y-1.5">
+            <label
+              htmlFor="expertise"
+              className="block text-xs font-medium text-neutral-700"
+            >
+              Area of Expertise
+            </label>
+            <input
+              type="text"
               id="expertise"
               name="expertise"
-              className="input" 
+              className="input text-xs"
               value={formData.expertise}
               onChange={handleChange}
-              placeholder="e.g., Web Dev, UI/UX"
+              placeholder="e.g. Web Development · DSA · React"
             />
           </div>
-          
+
           {/* Room Number */}
-          <div className="space-y-1">
-            <label htmlFor="roomNumber" className="block font-medium text-slate-700">Room Number</label>
-            <input 
-              type="text" 
+          <div className="space-y-1.5">
+            <label
+              htmlFor="roomNumber"
+              className="block text-xs font-medium text-neutral-700"
+            >
+              Room Number
+            </label>
+            <input
+              type="text"
               id="roomNumber"
               name="roomNumber"
-              className="input" 
+              className="input text-xs"
               value={formData.roomNumber}
               onChange={handleChange}
-              placeholder="e.g., A-101"
+              placeholder="e.g. B-041"
             />
           </div>
-          
-          {/* Contact Info */}
-          <div className="space-y-1">
-            <label htmlFor="contactInfo" className="block font-medium text-slate-700">Contact Info (WhatsApp)</label>
-            <input 
-              type="text" 
+
+          {/* Contact Info (WhatsApp) */}
+          <div className="space-y-1.5">
+            <label
+              htmlFor="contactInfo"
+              className="block text-xs font-medium text-neutral-700"
+            >
+              Contact (WhatsApp)
+            </label>
+            <input
+              type="text"
               id="contactInfo"
               name="contactInfo"
-              className="input" 
+              className="input text-xs"
               value={formData.contactInfo}
               onChange={handleChange}
-              placeholder="e.g., +91 9876543210"
+              placeholder="e.g. +91 98765 43210"
             />
           </div>
         </div>
-        
-        {/* Buttons */}
-        <div className="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
-          <button 
-            type="button" 
-            className="btn btn-secondary"
+
+        {/* Action Buttons */}
+        <div className="flex items-center justify-end gap-3 pt-6 border-t border-neutral-100">
+          <button
+            type="button"
+            className="btn btn-secondary text-xs"
             onClick={() => navigate('/profile')}
             disabled={loading || uploading}
           >
             Cancel
           </button>
-          <button 
-            type="submit" 
-            className="btn btn-primary min-w-[140px]"
+          <button
+            type="submit"
+            className="btn btn-primary text-xs min-w-[120px]"
             disabled={loading || uploading}
           >
             {loading || uploading ? (
               <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                Saving...
+                <div className="w-3.5 h-3.5 border-2 border-neutral-400 border-t-white rounded-full animate-spin" />
+                <span>Saving...</span>
               </span>
-            ) : 'Save Changes'}
+            ) : (
+              'Save Changes'
+            )}
           </button>
         </div>
       </form>
@@ -308,3 +376,4 @@ const EditProfile: React.FC = () => {
 };
 
 export default EditProfile;
+
