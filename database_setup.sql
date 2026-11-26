@@ -53,21 +53,46 @@ CREATE INDEX IF NOT EXISTS idx_blocked_users_pair ON blocked_users (blocker_id, 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Profiles are viewable by everyone" ON profiles;
+DROP POLICY IF EXISTS "Profiles are viewable by authenticated users" ON profiles;
 CREATE POLICY "Profiles are viewable by authenticated users" ON profiles
   FOR SELECT USING (auth.role() = 'authenticated');
 
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
 CREATE POLICY "Users can update their own profile" ON profiles
   FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
 CREATE POLICY "Users can insert their own profile" ON profiles
   FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Idempotent constraints on existing messages table
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_messages_content_length'
+  ) THEN
+    ALTER TABLE messages
+      ADD CONSTRAINT chk_messages_content_length
+      CHECK (char_length(trim(content)) BETWEEN 1 AND 2000) NOT VALID;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_messages_no_self'
+  ) THEN
+    ALTER TABLE messages
+      ADD CONSTRAINT chk_messages_no_self
+      CHECK (sender_id <> recipient_id) NOT VALID;
+  END IF;
+END $$;
 
 -- Set up Row Level Security (RLS) for messages
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view their own messages" ON messages;
 CREATE POLICY "Users can view their own messages" ON messages
   FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
 
+DROP POLICY IF EXISTS "Users can insert messages they send" ON messages;
 CREATE POLICY "Users can insert messages they send" ON messages
   FOR INSERT WITH CHECK (
     auth.uid() = sender_id
@@ -79,30 +104,37 @@ CREATE POLICY "Users can insert messages they send" ON messages
     )
   );
 
+DROP POLICY IF EXISTS "Users can update messages they received" ON messages;
 CREATE POLICY "Users can update messages they received" ON messages
   FOR UPDATE USING (auth.uid() = recipient_id);
 
+DROP POLICY IF EXISTS "Users can delete their own messages or conversations" ON messages;
 CREATE POLICY "Users can delete their own messages or conversations" ON messages
   FOR DELETE USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
 
 -- RLS for blocked_users
 ALTER TABLE blocked_users ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view their own blocks" ON blocked_users;
 CREATE POLICY "Users can view their own blocks" ON blocked_users
   FOR SELECT USING (auth.uid() = blocker_id OR auth.uid() = blocked_id);
 
+DROP POLICY IF EXISTS "Users can block other users" ON blocked_users;
 CREATE POLICY "Users can block other users" ON blocked_users
   FOR INSERT WITH CHECK (auth.uid() = blocker_id AND blocker_id <> blocked_id);
 
+DROP POLICY IF EXISTS "Users can unblock users they blocked" ON blocked_users;
 CREATE POLICY "Users can unblock users they blocked" ON blocked_users
   FOR DELETE USING (auth.uid() = blocker_id);
 
 -- RLS for message_reports
 ALTER TABLE message_reports ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can submit reports" ON message_reports;
 CREATE POLICY "Users can submit reports" ON message_reports
   FOR INSERT WITH CHECK (auth.uid() = reporter_id);
 
+DROP POLICY IF EXISTS "Users can view their own reports" ON message_reports;
 CREATE POLICY "Users can view their own reports" ON message_reports
   FOR SELECT USING (auth.uid() = reporter_id);
 
@@ -122,9 +154,11 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('profiles', 'profiles', true)
 ON CONFLICT (id) DO NOTHING;
 
+DROP POLICY IF EXISTS "Avatar images are publicly accessible" ON storage.objects;
 CREATE POLICY "Avatar images are publicly accessible" ON storage.objects
   FOR SELECT USING (bucket_id = 'profiles');
 
+DROP POLICY IF EXISTS "Authenticated users can upload their own avatar" ON storage.objects;
 CREATE POLICY "Authenticated users can upload their own avatar" ON storage.objects
   FOR INSERT WITH CHECK (
     bucket_id = 'profiles'
@@ -132,12 +166,14 @@ CREATE POLICY "Authenticated users can upload their own avatar" ON storage.objec
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 
+DROP POLICY IF EXISTS "Users can update their own avatar" ON storage.objects;
 CREATE POLICY "Users can update their own avatar" ON storage.objects
   FOR UPDATE USING (
     bucket_id = 'profiles'
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 
+DROP POLICY IF EXISTS "Users can delete their own avatar" ON storage.objects;
 CREATE POLICY "Users can delete their own avatar" ON storage.objects
   FOR DELETE USING (
     bucket_id = 'profiles'
