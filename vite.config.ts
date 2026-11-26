@@ -10,6 +10,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    allowedHosts: ['hostel-connect-93s7.onrender.com', '.onrender.com'],
+  },
+  preview: {
+    allowedHosts: ['hostel-connect-93s7.onrender.com', '.onrender.com'],
+  },
   build: {
     rollupOptions: {
       output: {
