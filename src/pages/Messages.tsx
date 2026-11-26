@@ -8,7 +8,7 @@ import {
   getDemoMessages,
   saveDemoMessages,
 } from '../lib/demoData';
-import { getCached, setCached } from '../lib/cache';
+import { getCached, setCached, invalidateCache } from '../lib/cache';
 import { format, isToday, isYesterday } from 'date-fns';
 import { Plus, Search as SearchIcon, Trash2, MessageSquare, ArrowRight } from 'lucide-react';
 
@@ -210,6 +210,7 @@ const Messages: React.FC = () => {
         );
 
       if (error) throw error;
+      invalidateCache('inbox_');
       setConversations((prev) => prev.filter((conv) => conv.user_id !== otherUserId));
     } catch (error) {
       console.error('Error deleting conversation:', error);

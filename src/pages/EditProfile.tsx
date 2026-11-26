@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { invalidateCache } from '../lib/cache';
 import { ArrowLeft, Upload, ChevronDown } from 'lucide-react';
 
 const EditProfile: React.FC = () => {
@@ -166,6 +167,7 @@ const EditProfile: React.FC = () => {
 
       if (error) throw error;
 
+      invalidateCache();
       await refreshProfile();
       setSuccessMsg('Profile updated successfully!');
       setTimeout(() => {

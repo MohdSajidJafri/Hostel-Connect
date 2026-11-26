@@ -152,6 +152,18 @@ const Conversation: React.FC = () => {
     otherNameRef.current = otherUserProfile?.full_name || 'Resident';
   }, [otherUserProfile?.full_name]);
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEmojiOpen(false);
+        setMenuOpen(false);
+        setReportOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // Safety states
   const [menuOpen, setMenuOpen] = useState(false);
   const [isBlockedByMe, setIsBlockedByMe] = useState(false);
