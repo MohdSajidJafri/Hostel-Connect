@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { usePresence } from '../context/PresenceContext';
+import { notifyNewMessage, requestNotificationPermission } from '../lib/notifications';
 import {
   DEMO_PROFILES,
   getDemoMessages,
@@ -26,6 +28,9 @@ import {
   Flag,
   ChevronDown,
   X,
+  Search,
+  Paperclip,
+  Bell,
 } from 'lucide-react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -34,6 +39,7 @@ type Message = {
   sender_id: string;
   recipient_id: string;
   content: string;
+  attachment_url?: string | null;
   read: boolean;
   created_at: string;
   status?: 'sending' | 'sent' | 'failed';
@@ -53,14 +59,17 @@ const Conversation: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const { user, isDemo } = useAuth();
+  const { isOnline } = usePresence();
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const lastTypingSentRef = useRef<number>(0);
   const sendTimestampsRef = useRef<number[]>([]);
+  const otherNameRef = useRef<string>('Resident');
 
   const [loading, setLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
@@ -72,6 +81,16 @@ const Conversation: React.FC = () => {
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [hasNewBelow, setHasNewBelow] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [notifEnabled, setNotifEnabled] = useState(
+    () => typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  );
+
+  useEffect(() => {
+    otherNameRef.current = otherUserProfile?.full_name || 'Resident';
+  }, [otherUserProfile?.full_name]);
 
   // Safety states
   const [menuOpen, setMenuOpen] = useState(false);
@@ -201,6 +220,7 @@ const Conversation: React.FC = () => {
           setMessages((prev) =>
             prev.some((m) => m.id === incoming.id) ? prev : [...prev, { ...incoming, status: 'sent' }]
           );
+          notifyNewMessage(otherNameRef.current, incoming.content);
           markMessageAsRead(incoming.id);
         }
       )
@@ -273,7 +293,29 @@ const Conversation: React.FC = () => {
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   };
 
-  const sendMessageContent = async (content: string, existingTempId?: string) => {
+  const uploadAttachment = async (file: File): Promise<string | null> => {
+    if (!user) return null;
+    if (isDemo) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(file);
+      });
+    }
+    const ext = file.name.split('.').pop() || 'bin';
+    const path = `${user.id}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('chat-attachments').upload(path, file);
+    if (error) throw error;
+    const { data } = supabase.storage.from('chat-attachments').getPublicUrl(path);
+    return data.publicUrl;
+  };
+
+  const sendMessageContent = async (
+    content: string,
+    existingTempId?: string,
+    attachmentUrl?: string | null
+  ) => {
     if (!user || !userId || isBlocked) return;
 
     const now = Date.now();
@@ -291,6 +333,7 @@ const Conversation: React.FC = () => {
         sender_id: user.id,
         recipient_id: userId,
         content,
+        attachment_url: attachmentUrl || null,
         read: false,
         created_at: new Date().toISOString(),
         status: 'sent',
@@ -307,6 +350,7 @@ const Conversation: React.FC = () => {
       sender_id: user.id,
       recipient_id: userId,
       content,
+      attachment_url: attachmentUrl || null,
       read: false,
       created_at: new Date().toISOString(),
       status: 'sending',
@@ -325,6 +369,7 @@ const Conversation: React.FC = () => {
           sender_id: user.id,
           recipient_id: userId,
           content,
+          attachment_url: attachmentUrl || null,
           read: false,
         })
         .select()
@@ -349,13 +394,26 @@ const Conversation: React.FC = () => {
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     const trimmed = newMessage.trim();
-    if (!trimmed || trimmed.length > MAX_MESSAGE_LENGTH || isBlocked) return;
+    const fileToSend = attachmentFile;
+    if ((!trimmed && !fileToSend) || trimmed.length > MAX_MESSAGE_LENGTH || isBlocked) return;
 
     setNewMessage('');
+    setAttachmentFile(null);
     if (composerRef.current) {
       composerRef.current.style.height = 'auto';
     }
-    await sendMessageContent(trimmed);
+
+    let uploadedUrl: string | null = null;
+    if (fileToSend) {
+      try {
+        uploadedUrl = await uploadAttachment(fileToSend);
+      } catch {
+        setErrorMsg('Failed to upload attachment.');
+        return;
+      }
+    }
+
+    await sendMessageContent(trimmed || `Attachment: ${fileToSend?.name}`, undefined, uploadedUrl);
   };
 
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -544,17 +602,22 @@ const Conversation: React.FC = () => {
           </button>
 
           <Link to={`/profile/${userId}`} className="flex items-center gap-3 group min-w-0">
-            <div className="w-8 h-8 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 flex-shrink-0">
-              {otherUserProfile?.avatar_url ? (
-                <img
-                  src={otherUserProfile.avatar_url}
-                  alt={otherUserProfile.full_name || 'Resident'}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <span>
-                  {otherUserProfile?.full_name ? otherUserProfile.full_name.charAt(0).toUpperCase() : 'U'}
-                </span>
+            <div className="relative flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800">
+                {otherUserProfile?.avatar_url ? (
+                  <img
+                    src={otherUserProfile.avatar_url}
+                    alt={otherUserProfile.full_name || 'Resident'}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span>
+                    {otherUserProfile?.full_name ? otherUserProfile.full_name.charAt(0).toUpperCase() : 'U'}
+                  </span>
+                )}
+              </div>
+              {userId && isOnline(userId) && (
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
               )}
             </div>
 
@@ -563,14 +626,47 @@ const Conversation: React.FC = () => {
                 {otherUserProfile?.full_name || 'Resident'}
               </h2>
               <span className="text-[10px] text-neutral-400 font-normal block">
-                {otherTyping ? 'Typing...' : isBlocked ? 'Blocked' : 'View profile'}
+                {otherTyping
+                  ? 'Typing...'
+                  : isBlocked
+                  ? 'Blocked'
+                  : userId && isOnline(userId)
+                  ? 'Online · View profile'
+                  : 'View profile'}
               </span>
             </div>
           </Link>
         </div>
 
-        {/* Safety Menu */}
-        <div className="relative">
+        {/* Header Actions: Search, Notifications, Safety Menu */}
+        <div className="flex items-center gap-1 relative">
+          <button
+            onClick={() => {
+              setChatSearchOpen((v) => !v);
+              setChatSearchQuery('');
+            }}
+            aria-label="Search messages in conversation"
+            data-testid="chat-search-toggle"
+            className="p-1.5 text-neutral-500 hover:text-neutral-950 hover:bg-neutral-100 rounded-md transition-colors"
+            title="Search in conversation"
+          >
+            <Search size={16} />
+          </button>
+
+          {!notifEnabled && typeof Notification !== 'undefined' && (
+            <button
+              onClick={async () => {
+                const granted = await requestNotificationPermission();
+                setNotifEnabled(granted);
+              }}
+              aria-label="Enable desktop notifications"
+              className="p-1.5 text-neutral-500 hover:text-neutral-950 hover:bg-neutral-100 rounded-md transition-colors"
+              title="Enable notifications"
+            >
+              <Bell size={16} />
+            </button>
+          )}
+
           <button
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="Conversation safety options"
@@ -606,6 +702,30 @@ const Conversation: React.FC = () => {
         </div>
       </div>
 
+      {chatSearchOpen && (
+        <div className="px-4 py-2 bg-neutral-50 border-b border-neutral-200 flex items-center gap-2">
+          <Search size={14} className="text-neutral-400 flex-shrink-0" />
+          <input
+            type="text"
+            value={chatSearchQuery}
+            onChange={(e) => setChatSearchQuery(e.target.value)}
+            placeholder="Search messages in this thread..."
+            data-testid="chat-search-input"
+            className="flex-1 bg-transparent text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none"
+            autoFocus
+          />
+          {chatSearchQuery && (
+            <button
+              onClick={() => setChatSearchQuery('')}
+              className="text-neutral-400 hover:text-neutral-900 p-0.5"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      )}
+
       {errorMsg && (
         <div role="alert" className="px-4 py-2 bg-red-50 border-b border-red-200 text-xs text-red-800 flex items-center justify-between gap-2">
           <span>{errorMsg}</span>
@@ -637,9 +757,15 @@ const Conversation: React.FC = () => {
           </div>
         ) : messages.length > 0 ? (
           <>
-            {messages.map((m, idx) => {
+            {messages
+              .filter(
+                (m) =>
+                  !chatSearchQuery.trim() ||
+                  m.content.toLowerCase().includes(chatSearchQuery.toLowerCase())
+              )
+              .map((m, idx, visibleList) => {
               const isMine = m.sender_id === user.id;
-              const prev = idx > 0 ? messages[idx - 1] : null;
+              const prev = idx > 0 ? visibleList[idx - 1] : null;
               const prevDateKey = prev ? getDateKey(prev.created_at) : null;
               const currDateKey = getDateKey(m.created_at);
               const showDateDivider = idx === 0 || currDateKey !== prevDateKey;
@@ -671,6 +797,20 @@ const Conversation: React.FC = () => {
                           : 'bg-white border border-neutral-200 text-neutral-900 rounded-tl-xs'
                       }`}
                     >
+                      {m.attachment_url && (
+                        <a
+                          href={m.attachment_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block mb-1.5"
+                        >
+                          <img
+                            src={m.attachment_url}
+                            alt="Attachment"
+                            className="max-h-48 rounded-lg border border-neutral-200/40 object-cover"
+                          />
+                        </a>
+                      )}
                       <p className="text-xs leading-relaxed break-words whitespace-pre-wrap">
                         {m.content}
                       </p>
@@ -776,38 +916,77 @@ const Conversation: React.FC = () => {
       ) : (
         <form
           onSubmit={handleSendMessage}
-          className="p-3 bg-white border-t border-neutral-200 flex items-end gap-2"
+          className="p-3 bg-white border-t border-neutral-200 space-y-2"
         >
-          <div className="flex-1 relative">
-            <textarea
-              ref={composerRef}
-              rows={1}
-              maxLength={MAX_MESSAGE_LENGTH}
-              placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
-              value={newMessage}
+          {attachmentFile && (
+            <div className="flex items-center justify-between px-2.5 py-1.5 bg-neutral-50 border border-neutral-200 rounded text-xs text-neutral-700">
+              <span className="truncate">Attached: {attachmentFile.name}</span>
+              <button
+                type="button"
+                onClick={() => setAttachmentFile(null)}
+                className="text-neutral-400 hover:text-neutral-900 p-0.5"
+                aria-label="Remove attachment"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
               onChange={(e) => {
-                setNewMessage(e.target.value);
-                adjustComposerHeight();
-                emitTyping();
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 5 * 1024 * 1024) {
+                  setErrorMsg('Attachment must be under 5MB.');
+                  return;
+                }
+                setAttachmentFile(file);
               }}
-              onKeyDown={handleComposerKeyDown}
-              className="w-full px-3.5 py-2 bg-neutral-50 border border-neutral-200 rounded-md text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:bg-white focus:border-neutral-900 focus:ring-1 focus:ring-neutral-900 transition-all resize-none leading-relaxed"
             />
-            {newMessage.length > MAX_MESSAGE_LENGTH - 250 && (
-              <span className="absolute right-2.5 bottom-1.5 text-[10px] text-neutral-400">
-                {newMessage.length}/{MAX_MESSAGE_LENGTH}
-              </span>
-            )}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach image"
+              className="p-2.5 text-neutral-500 hover:text-neutral-950 hover:bg-neutral-100 rounded-md transition-colors flex-shrink-0"
+              title="Attach image (max 5MB)"
+            >
+              <Paperclip size={15} />
+            </button>
+            <div className="flex-1 relative">
+              <textarea
+                ref={composerRef}
+                rows={1}
+                maxLength={MAX_MESSAGE_LENGTH}
+                placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+                value={newMessage}
+                onChange={(e) => {
+                  setNewMessage(e.target.value);
+                  adjustComposerHeight();
+                  emitTyping();
+                }}
+                onKeyDown={handleComposerKeyDown}
+                className="w-full px-3.5 py-2 bg-neutral-50 border border-neutral-200 rounded-md text-xs text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:bg-white focus:border-neutral-900 focus:ring-1 focus:ring-neutral-900 transition-all resize-none leading-relaxed"
+              />
+              {newMessage.length > MAX_MESSAGE_LENGTH - 250 && (
+                <span className="absolute right-2.5 bottom-1.5 text-[10px] text-neutral-400">
+                  {newMessage.length}/{MAX_MESSAGE_LENGTH}
+                </span>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={!newMessage.trim() && !attachmentFile}
+              aria-label="Send message"
+              className="btn btn-primary p-2.5 rounded-md disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+              title="Send message"
+            >
+              <Send size={15} />
+            </button>
           </div>
-          <button
-            type="submit"
-            disabled={!newMessage.trim()}
-            aria-label="Send message"
-            className="btn btn-primary p-2.5 rounded-md disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-            title="Send message"
-          >
-            <Send size={15} />
-          </button>
         </form>
       )}
 

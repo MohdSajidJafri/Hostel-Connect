@@ -20,6 +20,8 @@ export interface Database {
           domain: string | null
           room_number: string | null
           contact_info: string | null
+          availability_status: string | null
+          is_verified: boolean | null
           created_at: string
           updated_at: string | null
         }
@@ -33,6 +35,8 @@ export interface Database {
           domain?: string | null
           room_number?: string | null
           contact_info?: string | null
+          availability_status?: string | null
+          is_verified?: boolean | null
           created_at?: string
           updated_at?: string | null
         }
@@ -46,6 +50,8 @@ export interface Database {
           domain?: string | null
           room_number?: string | null
           contact_info?: string | null
+          availability_status?: string | null
+          is_verified?: boolean | null
           created_at?: string
           updated_at?: string | null
         }
@@ -56,6 +62,7 @@ export interface Database {
           sender_id: string
           recipient_id: string
           content: string
+          attachment_url: string | null
           read: boolean
           created_at: string
         }
@@ -64,6 +71,7 @@ export interface Database {
           sender_id: string
           recipient_id: string
           content: string
+          attachment_url?: string | null
           read?: boolean
           created_at?: string
         }
@@ -72,6 +80,7 @@ export interface Database {
           sender_id?: string
           recipient_id?: string
           content?: string
+          attachment_url?: string | null
           read?: boolean
           created_at?: string
         }
@@ -116,6 +125,61 @@ export interface Database {
           reporter_id?: string
           reported_user_id?: string
           reason?: string
+          created_at?: string
+        }
+      }
+      community_posts: {
+        Row: {
+          id: string
+          author_id: string
+          category: 'help' | 'group' | 'borrow' | 'marketplace' | 'notice'
+          title: string
+          description: string
+          tags: string[]
+          price: string | null
+          status: 'open' | 'resolved'
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          author_id: string
+          category: 'help' | 'group' | 'borrow' | 'marketplace' | 'notice'
+          title: string
+          description: string
+          tags?: string[]
+          price?: string | null
+          status?: 'open' | 'resolved'
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          author_id?: string
+          category?: 'help' | 'group' | 'borrow' | 'marketplace' | 'notice'
+          title?: string
+          description?: string
+          tags?: string[]
+          price?: string | null
+          status?: 'open' | 'resolved'
+          created_at?: string
+        }
+      }
+      saved_contacts: {
+        Row: {
+          id: string
+          user_id: string
+          contact_user_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          contact_user_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          contact_user_id?: string
           created_at?: string
         }
       }

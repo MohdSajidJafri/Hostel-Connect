@@ -1,30 +1,56 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { usePresence } from '../context/PresenceContext';
 import { supabase, Profile } from '../lib/supabase';
-import { DEMO_PROFILES } from '../lib/demoData';
+import { DEMO_PROFILES, getDemoSavedContacts } from '../lib/demoData';
 import { getCached, setCached } from '../lib/cache';
-import { Search, MessageSquare, User, ArrowRight } from 'lucide-react';
+import { Search, MessageSquare, Users, ArrowRight, Bookmark } from 'lucide-react';
 
 const RECENT_CACHE_KEY = 'recent_profiles';
 
 const Home: React.FC = () => {
   const { profile, user, isDemo } = useAuth();
+  const { isOnline } = usePresence();
   const navigate = useNavigate();
   const [recentProfiles, setRecentProfiles] = useState<Profile[]>(
     () => getCached<Profile[]>(RECENT_CACHE_KEY, 60_000) || []
   );
+  const [savedProfiles, setSavedProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(() => !getCached<Profile[]>(RECENT_CACHE_KEY, 60_000));
 
   useEffect(() => {
     if (isDemo) {
       setRecentProfiles(DEMO_PROFILES.filter((p) => p.user_id !== user?.id).slice(0, 5));
+      const savedIds = getDemoSavedContacts();
+      setSavedProfiles(DEMO_PROFILES.filter((p) => savedIds.includes(p.user_id)));
       setLoading(false);
       return;
     }
     fetchRecentProfiles();
+    fetchSavedProfiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDemo, user?.id]);
+
+  const fetchSavedProfiles = async () => {
+    if (!user) return;
+    try {
+      const { data: savedRows } = await supabase
+        .from('saved_contacts')
+        .select('contact_user_id')
+        .eq('user_id', user.id)
+        .limit(5);
+      const ids = (savedRows || []).map((r) => r.contact_user_id);
+      if (ids.length === 0) return;
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, user_id, full_name, avatar_url, domain, year_of_study, room_number, created_at')
+        .in('user_id', ids);
+      if (profs) setSavedProfiles(profs as Profile[]);
+    } catch {
+      // Ignore optional saved contacts fetch errors
+    }
+  };
 
   const fetchRecentProfiles = async () => {
     try {
@@ -142,28 +168,60 @@ const Home: React.FC = () => {
           </div>
         </Link>
 
-        {/* Block 3: Your Profile */}
+        {/* Block 3: Community Board */}
         <Link
-          to="/profile"
+          to="/community"
           className="group relative p-6 bg-white border border-neutral-200 rounded-xl shadow-subtle hover:border-neutral-950/40 transition-all duration-200 flex flex-col justify-between"
         >
           <div>
             <div className="w-9 h-9 rounded-lg bg-neutral-100 flex items-center justify-center text-neutral-900 mb-5 group-hover:bg-neutral-950 group-hover:text-white transition-colors">
-              <User size={18} strokeWidth={2} />
+              <Users size={18} strokeWidth={2} />
             </div>
             <h2 className="text-base font-semibold text-neutral-950 tracking-tight mb-1.5">
-              Your Profile
+              Community Board
             </h2>
             <p className="text-xs text-neutral-500 leading-relaxed">
-              Manage your personal information, room number, and showcase your skills.
+              Ask seniors, find hackathon teammates, borrow items, or browse notices.
             </p>
           </div>
           <div className="pt-6 mt-4 border-t border-neutral-100 flex items-center text-xs font-medium text-neutral-900 group-hover:translate-x-0.5 transition-transform">
-            <span>View Profile</span>
+            <span>Open Board</span>
             <ArrowRight size={14} className="ml-1.5 text-neutral-400 group-hover:text-neutral-950" />
           </div>
         </Link>
       </div>
+
+      {/* Saved / Pinned Mentors & Peers */}
+      {savedProfiles.length > 0 && (
+        <div className="pt-1">
+          <div className="flex items-center gap-1.5 mb-3">
+            <Bookmark size={14} className="text-neutral-500" />
+            <h2 className="text-sm font-semibold tracking-tight text-neutral-900">
+              Saved Contacts
+            </h2>
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            {savedProfiles.map((sp) => (
+              <button
+                key={sp.user_id}
+                onClick={() => navigate(`/messages/${sp.user_id}`)}
+                className="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-lg hover:border-neutral-950/40 transition-colors shadow-subtle text-left"
+              >
+                <div className="relative w-7 h-7 rounded-full bg-neutral-100 border border-neutral-200 flex items-center justify-center text-[11px] font-semibold text-neutral-800">
+                  {sp.full_name ? sp.full_name.charAt(0).toUpperCase() : 'U'}
+                  {isOnline(sp.user_id) && (
+                    <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white" />
+                  )}
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-neutral-950">{sp.full_name}</div>
+                  <div className="text-[10px] text-neutral-500">{sp.room_number || sp.domain || 'Resident'}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Recently Joined Section */}
       <div className="pt-2">
@@ -198,19 +256,27 @@ const Home: React.FC = () => {
                 onClick={() => navigate(`/messages/${p.user_id}`)}
                 className="group p-4 bg-white border border-neutral-200 rounded-xl hover:border-neutral-950/40 transition-all cursor-pointer flex flex-col items-center text-center shadow-subtle"
               >
-                <div className="w-12 h-12 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 mb-2.5 group-hover:scale-105 transition-transform">
-                  {p.avatar_url ? (
-                    <img
-                      src={p.avatar_url}
-                      alt={p.full_name || 'Resident'}
-                      loading="lazy"
-                      decoding="async"
-                      className="w-full h-full object-cover"
+                <div className="relative mb-2.5">
+                  <div className="w-12 h-12 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 group-hover:scale-105 transition-transform">
+                    {p.avatar_url ? (
+                      <img
+                        src={p.avatar_url}
+                        alt={p.full_name || 'Resident'}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span>
+                        {p.full_name ? p.full_name.charAt(0).toUpperCase() : 'U'}
+                      </span>
+                    )}
+                  </div>
+                  {isOnline(p.user_id) && (
+                    <span
+                      title="Online"
+                      className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-white"
                     />
-                  ) : (
-                    <span>
-                      {p.full_name ? p.full_name.charAt(0).toUpperCase() : 'U'}
-                    </span>
                   )}
                 </div>
                 <h3 className="text-xs font-semibold text-neutral-950 truncate max-w-full">

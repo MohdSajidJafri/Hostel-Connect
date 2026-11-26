@@ -9,9 +9,14 @@ CREATE TABLE IF NOT EXISTS profiles (
   domain TEXT,
   room_number TEXT,
   contact_info TEXT,
+  availability_status TEXT DEFAULT 'Open to Connect',
+  is_verified BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE
 );
+
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS availability_status TEXT DEFAULT 'Open to Connect';
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
 
 -- Create messages table with safety constraints
 CREATE TABLE IF NOT EXISTS messages (
@@ -19,10 +24,13 @@ CREATE TABLE IF NOT EXISTS messages (
   sender_id UUID REFERENCES auth.users(id) NOT NULL,
   recipient_id UUID REFERENCES auth.users(id) NOT NULL,
   content TEXT NOT NULL CHECK (char_length(trim(content)) BETWEEN 1 AND 2000),
+  attachment_url TEXT,
   read BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   CHECK (sender_id <> recipient_id)
 );
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_url TEXT;
 
 -- Create blocked_users table for user safety
 CREATE TABLE IF NOT EXISTS blocked_users (
@@ -43,11 +51,36 @@ CREATE TABLE IF NOT EXISTS message_reports (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Create community_posts table (Help Board, Groups, Borrow/Lost, Marketplace, Notices)
+CREATE TABLE IF NOT EXISTS community_posts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  author_id UUID REFERENCES auth.users(id) NOT NULL,
+  category TEXT NOT NULL CHECK (category IN ('help', 'group', 'borrow', 'marketplace', 'notice')),
+  title TEXT NOT NULL CHECK (char_length(trim(title)) BETWEEN 2 AND 140),
+  description TEXT NOT NULL CHECK (char_length(trim(description)) BETWEEN 2 AND 1500),
+  tags TEXT[] DEFAULT '{}',
+  price TEXT,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create saved_contacts table (bookmarked peers/seniors)
+CREATE TABLE IF NOT EXISTS saved_contacts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES auth.users(id) NOT NULL,
+  contact_user_id UUID REFERENCES auth.users(id) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (user_id, contact_user_id),
+  CHECK (user_id <> contact_user_id)
+);
+
 -- Indexes for query performance
 CREATE INDEX IF NOT EXISTS idx_profiles_created_at ON profiles (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_participants_created ON messages (sender_id, recipient_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_messages_recipient_unread ON messages (recipient_id, read) WHERE read = FALSE;
 CREATE INDEX IF NOT EXISTS idx_blocked_users_pair ON blocked_users (blocker_id, blocked_id);
+CREATE INDEX IF NOT EXISTS idx_community_posts_created ON community_posts (category, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_saved_contacts_user ON saved_contacts (user_id);
 
 -- Set up Row Level Security (RLS) for profiles
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
@@ -138,7 +171,41 @@ DROP POLICY IF EXISTS "Users can view their own reports" ON message_reports;
 CREATE POLICY "Users can view their own reports" ON message_reports
   FOR SELECT USING (auth.uid() = reporter_id);
 
--- Enable Realtime on messages table
+-- RLS for community_posts
+ALTER TABLE community_posts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated users can view community posts" ON community_posts;
+CREATE POLICY "Authenticated users can view community posts" ON community_posts
+  FOR SELECT USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Users can create community posts" ON community_posts;
+CREATE POLICY "Users can create community posts" ON community_posts
+  FOR INSERT WITH CHECK (auth.uid() = author_id);
+
+DROP POLICY IF EXISTS "Authors can update their own posts" ON community_posts;
+CREATE POLICY "Authors can update their own posts" ON community_posts
+  FOR UPDATE USING (auth.uid() = author_id);
+
+DROP POLICY IF EXISTS "Authors can delete their own posts" ON community_posts;
+CREATE POLICY "Authors can delete their own posts" ON community_posts
+  FOR DELETE USING (auth.uid() = author_id);
+
+-- RLS for saved_contacts
+ALTER TABLE saved_contacts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view their saved contacts" ON saved_contacts;
+CREATE POLICY "Users can view their saved contacts" ON saved_contacts
+  FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can save contacts" ON saved_contacts;
+CREATE POLICY "Users can save contacts" ON saved_contacts
+  FOR INSERT WITH CHECK (auth.uid() = user_id AND user_id <> contact_user_id);
+
+DROP POLICY IF EXISTS "Users can remove saved contacts" ON saved_contacts;
+CREATE POLICY "Users can remove saved contacts" ON saved_contacts
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- Enable Realtime on messages and community_posts
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -147,21 +214,31 @@ BEGIN
   ) THEN
     ALTER PUBLICATION supabase_realtime ADD TABLE messages;
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'community_posts'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE community_posts;
+  END IF;
 END $$;
 
--- Storage bucket & policies for profile avatars
+-- Storage buckets & policies for profile avatars and chat attachments
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('profiles', 'profiles', true)
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('chat-attachments', 'chat-attachments', true)
+ON CONFLICT (id) DO NOTHING;
+
 DROP POLICY IF EXISTS "Avatar images are publicly accessible" ON storage.objects;
 CREATE POLICY "Avatar images are publicly accessible" ON storage.objects
-  FOR SELECT USING (bucket_id = 'profiles');
+  FOR SELECT USING (bucket_id IN ('profiles', 'chat-attachments'));
 
 DROP POLICY IF EXISTS "Authenticated users can upload their own avatar" ON storage.objects;
 CREATE POLICY "Authenticated users can upload their own avatar" ON storage.objects
   FOR INSERT WITH CHECK (
-    bucket_id = 'profiles'
+    bucket_id IN ('profiles', 'chat-attachments')
     AND auth.role() = 'authenticated'
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
@@ -169,14 +246,14 @@ CREATE POLICY "Authenticated users can upload their own avatar" ON storage.objec
 DROP POLICY IF EXISTS "Users can update their own avatar" ON storage.objects;
 CREATE POLICY "Users can update their own avatar" ON storage.objects
   FOR UPDATE USING (
-    bucket_id = 'profiles'
+    bucket_id IN ('profiles', 'chat-attachments')
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 
 DROP POLICY IF EXISTS "Users can delete their own avatar" ON storage.objects;
 CREATE POLICY "Users can delete their own avatar" ON storage.objects
   FOR DELETE USING (
-    bucket_id = 'profiles'
+    bucket_id IN ('profiles', 'chat-attachments')
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
 

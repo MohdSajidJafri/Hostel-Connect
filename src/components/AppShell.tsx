@@ -3,16 +3,18 @@ import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { DEMO_MESSAGES_EVENT, getDemoUnreadCount } from '../lib/demoData';
-import { 
-  Home, 
-  Search, 
-  MessageSquare, 
-  User, 
-  Settings, 
-  HelpCircle, 
-  LogOut, 
-  Menu, 
-  X
+import {
+  Home,
+  Search,
+  MessageSquare,
+  User,
+  Settings,
+  HelpCircle,
+  LogOut,
+  Menu,
+  X,
+  Users,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface AppShellProps {
@@ -101,6 +103,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const navItems = [
     { label: 'Home', path: '/', icon: Home },
     { label: 'Search', path: '/search', icon: Search },
+    { label: 'Community', path: '/community', icon: Users },
     { label: 'Messages', path: '/messages', icon: MessageSquare },
     { label: 'Profile', path: '/profile', icon: User },
   ];
@@ -164,6 +167,13 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           >
             <Settings size={15} strokeWidth={1.8} />
             <span>Settings</span>
+          </Link>
+          <Link
+            to="/admin"
+            className="flex items-center gap-3 px-3 py-2 rounded-md text-xs text-neutral-500 hover:text-neutral-950 hover:bg-neutral-50 transition-colors"
+          >
+            <ShieldAlert size={15} strokeWidth={1.8} />
+            <span>Safety Reports</span>
           </Link>
           <a
             href="mailto:support@hostelconnect.internal"

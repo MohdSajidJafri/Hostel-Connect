@@ -27,6 +27,8 @@ export type Profile = {
   domain: string | null;
   room_number: string | null;
   contact_info: string | null;
+  availability_status?: string | null;
+  is_verified?: boolean | null;
   created_at: string;
   updated_at: string | null;
 };

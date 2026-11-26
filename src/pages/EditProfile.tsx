@@ -31,6 +31,7 @@ const EditProfile: React.FC = () => {
     expertise: '',
     roomNumber: '',
     contactInfo: '',
+    availabilityStatus: 'Open to Connect',
   });
 
   useEffect(() => {
@@ -42,6 +43,7 @@ const EditProfile: React.FC = () => {
         expertise: profile.expertise || '',
         roomNumber: profile.room_number || '',
         contactInfo: profile.contact_info || '',
+        availabilityStatus: profile.availability_status || 'Open to Connect',
       });
 
       if (profile.avatar_url) {
@@ -127,6 +129,7 @@ const EditProfile: React.FC = () => {
           expertise: formData.expertise,
           room_number: formData.roomNumber,
           contact_info: formData.contactInfo,
+          availability_status: formData.availabilityStatus,
           avatar_url: avatarUrl || profile?.avatar_url || null,
         });
         setSuccessMsg('Profile updated successfully!');
@@ -152,6 +155,7 @@ const EditProfile: React.FC = () => {
           expertise: formData.expertise,
           room_number: formData.roomNumber,
           contact_info: formData.contactInfo,
+          availability_status: formData.availabilityStatus,
           avatar_url: newAvatarUrl,
           updated_at: new Date().toISOString(),
         },
@@ -371,6 +375,35 @@ const EditProfile: React.FC = () => {
               onChange={handleChange}
               placeholder="e.g. +91 98765 43210"
             />
+          </div>
+
+          {/* Availability Status */}
+          <div className="space-y-1.5 sm:col-span-2">
+            <label
+              htmlFor="availabilityStatus"
+              className="block text-xs font-medium text-neutral-700"
+            >
+              Availability Status
+            </label>
+            <div className="relative">
+              <select
+                id="availabilityStatus"
+                name="availabilityStatus"
+                className="input text-xs appearance-none pr-8 cursor-pointer"
+                value={formData.availabilityStatus}
+                onChange={handleChange}
+              >
+                <option value="Open to Connect">Open to Connect</option>
+                <option value="Open to Mentor">Open to Mentor</option>
+                <option value="In Room">In Room</option>
+                <option value="At Library">At Library</option>
+                <option value="Busy (Exams)">Busy (Exams)</option>
+              </select>
+              <ChevronDown
+                size={14}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+              />
+            </div>
           </div>
         </div>
 

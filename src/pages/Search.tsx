@@ -2,15 +2,17 @@ import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, Profile } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import { usePresence } from '../context/PresenceContext';
 import { DEMO_PROFILES } from '../lib/demoData';
 import { getCached, setCached } from '../lib/cache';
-import { Search as SearchIcon, X, RotateCcw, ChevronDown } from 'lucide-react';
+import { Search as SearchIcon, X, RotateCcw, ChevronDown, BadgeCheck } from 'lucide-react';
 
 const DIRECTORY_CACHE_KEY = 'directory_profiles';
 const PAGE_SIZE = 40;
 
 const Search: React.FC = () => {
   const { isDemo, user } = useAuth();
+  const { isOnline } = usePresence();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
@@ -49,7 +51,7 @@ const Search: React.FC = () => {
       }
       let query = supabase
         .from('profiles')
-        .select('id, user_id, full_name, avatar_url, year_of_study, expertise, domain, room_number, created_at')
+        .select('id, user_id, full_name, avatar_url, year_of_study, expertise, domain, room_number, availability_status, is_verified, created_at')
         .order('created_at', { ascending: false })
         .limit(200);
 
@@ -254,27 +256,45 @@ const Search: React.FC = () => {
                 onClick={() => navigate(`/profile/${p.user_id}`)}
                 className="flex items-start gap-3.5 min-w-0 cursor-pointer group"
               >
-                <div className="w-11 h-11 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 flex-shrink-0 mt-0.5">
-                  {p.avatar_url ? (
-                    <img
-                      src={p.avatar_url}
-                      alt={p.full_name || 'Resident'}
-                      loading="lazy"
-                      decoding="async"
-                      className="w-full h-full object-cover"
+                <div className="relative flex-shrink-0 mt-0.5">
+                  <div className="w-11 h-11 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800">
+                    {p.avatar_url ? (
+                      <img
+                        src={p.avatar_url}
+                        alt={p.full_name || 'Resident'}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span>
+                        {p.full_name ? p.full_name.charAt(0).toUpperCase() : 'U'}
+                      </span>
+                    )}
+                  </div>
+                  {isOnline(p.user_id) && (
+                    <span
+                      title="Online"
+                      className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white"
                     />
-                  ) : (
-                    <span>
-                      {p.full_name ? p.full_name.charAt(0).toUpperCase() : 'U'}
-                    </span>
                   )}
                 </div>
 
                 <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <h2 className="text-sm font-semibold text-neutral-950 truncate group-hover:underline">
                       {p.full_name || 'Unnamed Resident'}
                     </h2>
+                    {p.is_verified && (
+                      <span title="Verified Resident">
+                        <BadgeCheck size={14} className="text-sky-600 flex-shrink-0" />
+                      </span>
+                    )}
+                    {p.availability_status && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">
+                        {p.availability_status}
+                      </span>
+                    )}
                   </div>
 
                   <p className="text-xs text-neutral-500 font-normal">
@@ -283,9 +303,26 @@ const Search: React.FC = () => {
                   </p>
 
                   {p.expertise && (
-                    <p className="text-xs text-neutral-600 font-normal pt-0.5">
-                      {p.expertise}
-                    </p>
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {p.expertise
+                        .split(/[·,]/)
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                        .slice(0, 4)
+                        .map((skill) => (
+                          <button
+                            key={skill}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSearchChange(skill);
+                            }}
+                            className="text-[11px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition-colors"
+                          >
+                            {skill}
+                          </button>
+                        ))}
+                    </div>
                   )}
                 </div>
               </div>
