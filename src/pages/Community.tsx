@@ -276,17 +276,19 @@ const Community: React.FC = () => {
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
           {CATEGORIES.map((c) => {
             const active = activeTab === c.id;
+            const Icon = c.icon;
             return (
               <button
                 key={c.id}
                 onClick={() => setActiveTab(c.id)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap inline-flex items-center gap-1.5 ${
                   active
                     ? 'bg-neutral-950 text-white'
                     : 'bg-white border border-neutral-200 text-neutral-600 hover:text-neutral-950 hover:bg-neutral-50'
                 }`}
               >
-                {c.label}
+                <Icon size={13} />
+                <span>{c.label}</span>
               </button>
             );
           })}
@@ -316,9 +318,11 @@ const Community: React.FC = () => {
             return (
               <div
                 key={post.id}
-                className={`p-5 bg-white border border-neutral-200 rounded-xl shadow-subtle space-y-3 ${
-                  post.status === 'resolved' ? 'opacity-70' : ''
-                }`}
+                className={`p-5 border rounded-xl shadow-subtle space-y-3 ${
+                  post.category === 'notice'
+                    ? 'bg-neutral-50 border-neutral-300'
+                    : 'bg-white border-neutral-200'
+                } ${post.status === 'resolved' ? 'opacity-70' : ''}`}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">

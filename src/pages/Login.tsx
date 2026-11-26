@@ -97,29 +97,51 @@ const Login: React.FC = () => {
   return (
     <div className="min-h-screen bg-white flex flex-col md:flex-row text-neutral-900">
       {/* Left Column: Editorial Statement */}
-      <div className="flex-1 flex flex-col justify-between p-8 sm:p-12 lg:p-16 border-b md:border-b-0 md:border-r border-neutral-200 bg-neutral-50/50">
+      <div className="flex-1 flex flex-col justify-between p-8 sm:p-12 lg:p-16 border-b md:border-b-0 md:border-r border-neutral-200 bg-neutral-50/70 relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(#e5e5e5_1px,transparent_1px)] [background-size:20px_20px] opacity-60 pointer-events-none" />
         {/* Brand Header */}
-        <div className="flex items-center gap-2.5">
+        <div className="relative flex items-center gap-2.5">
           <div className="w-7 h-7 bg-neutral-950 text-white rounded-md flex items-center justify-center font-bold text-xs">
             H
           </div>
           <span className="font-semibold text-sm tracking-tight text-neutral-950">Hostel Connect</span>
         </div>
 
-        {/* Hero Editorial Typography */}
-        <div className="my-12 md:my-auto max-w-lg">
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-neutral-950 leading-[1.08] mb-6">
-            Connect.<br />
-            Collaborate.<br />
-            Belong.
-          </h1>
-          <p className="text-neutral-600 text-base sm:text-lg leading-relaxed font-normal">
-            A platform for hostel residents to interact, share and grow together.
-          </p>
+        {/* Hero Editorial Typography & Monochrome Feature Bento */}
+        <div className="relative my-10 md:my-auto max-w-lg space-y-8">
+          <div>
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-neutral-950 leading-[1.08] mb-5">
+              Connect.<br />
+              Collaborate.<br />
+              Belong.
+            </h1>
+            <p className="text-neutral-600 text-base sm:text-lg leading-relaxed font-normal">
+              Your residence directory, community board, and real-time network—built for seniors and juniors.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="p-3 bg-white/90 border border-neutral-200 rounded-lg">
+              <div className="text-xs font-semibold text-neutral-950">Resident Directory</div>
+              <div className="text-[11px] text-neutral-500 mt-0.5">Filter by skill, course, block & year</div>
+            </div>
+            <div className="p-3 bg-white/90 border border-neutral-200 rounded-lg">
+              <div className="text-xs font-semibold text-neutral-950">Real-Time Chat</div>
+              <div className="text-[11px] text-neutral-500 mt-0.5">Live presence, read receipts & media</div>
+            </div>
+            <div className="p-3 bg-white/90 border border-neutral-200 rounded-lg">
+              <div className="text-xs font-semibold text-neutral-950">Community Board</div>
+              <div className="text-[11px] text-neutral-500 mt-0.5">Ask seniors, teams, borrow & buy/sell</div>
+            </div>
+            <div className="p-3 bg-white/90 border border-neutral-200 rounded-lg">
+              <div className="text-xs font-semibold text-neutral-950">Built-In Safety</div>
+              <div className="text-[11px] text-neutral-500 mt-0.5">Block, report & RLS protection</div>
+            </div>
+          </div>
         </div>
 
         {/* Minimal Floorplan / Subtle Room Aesthetic Indicator */}
-        <div className="pt-6 border-t border-neutral-200/80 flex items-center justify-between text-xs text-neutral-500">
+        <div className="relative pt-6 border-t border-neutral-200/80 flex items-center justify-between text-xs text-neutral-500">
           <span>Community Directory & Messaging</span>
           <span>Residence Network</span>
         </div>

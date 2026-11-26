@@ -15,6 +15,7 @@ import {
   X,
   Users,
   ShieldAlert,
+  Plus,
 } from 'lucide-react';
 
 interface AppShellProps {
@@ -233,6 +234,14 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
           {/* TopBar Right Actions */}
           <div className="flex items-center gap-2">
+            <Link
+              to="/community"
+              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 rounded-md transition-colors"
+              title="Community Board"
+            >
+              <Plus size={13} />
+              <span>Board</span>
+            </Link>
             <Link
               to="/messages"
               className="relative p-2 text-neutral-600 hover:text-neutral-950 hover:bg-neutral-100 rounded-md transition-colors"
