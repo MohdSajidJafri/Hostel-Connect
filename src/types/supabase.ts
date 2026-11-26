@@ -76,6 +76,49 @@ export interface Database {
           created_at?: string
         }
       }
+      blocked_users: {
+        Row: {
+          id: string
+          blocker_id: string
+          blocked_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          blocker_id: string
+          blocked_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          blocker_id?: string
+          blocked_id?: string
+          created_at?: string
+        }
+      }
+      message_reports: {
+        Row: {
+          id: string
+          reporter_id: string
+          reported_user_id: string
+          reason: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          reporter_id: string
+          reported_user_id: string
+          reason: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          reporter_id?: string
+          reported_user_id?: string
+          reason?: string
+          created_at?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never

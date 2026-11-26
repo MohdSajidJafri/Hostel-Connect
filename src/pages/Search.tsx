@@ -1,42 +1,68 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useDeferredValue } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase, Profile } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
+import { DEMO_PROFILES } from '../lib/demoData';
+import { getCached, setCached } from '../lib/cache';
 import { Search as SearchIcon, X, RotateCcw, ChevronDown } from 'lucide-react';
 
+const DIRECTORY_CACHE_KEY = 'directory_profiles';
+const PAGE_SIZE = 40;
+
 const Search: React.FC = () => {
+  const { isDemo, user } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
   
   const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const deferredQuery = useDeferredValue(searchQuery);
   const [selectedCourse, setSelectedCourse] = useState<string>('All');
   const [selectedYear, setSelectedYear] = useState<string>('All');
   const [selectedRoom, setSelectedRoom] = useState<string>('All');
-  const [loading, setLoading] = useState(true);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [profiles, setProfiles] = useState<Profile[]>(
+    () => getCached<Profile[]>(DIRECTORY_CACHE_KEY, 60_000) || []
+  );
+  const [loading, setLoading] = useState(() => !getCached<Profile[]>(DIRECTORY_CACHE_KEY, 60_000));
 
   useEffect(() => {
+    if (isDemo) {
+      setProfiles(DEMO_PROFILES.filter((p) => p.user_id !== user?.id));
+      setLoading(false);
+      return;
+    }
     fetchProfiles();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo, user?.id]);
 
   // Sync state if URL search param changes
   useEffect(() => {
-    const q = searchParams.get('q');
-    if (q !== null && q !== searchQuery) {
-      setSearchQuery(q);
-    }
+    const q = searchParams.get('q') ?? '';
+    setSearchQuery(q);
   }, [searchParams]);
 
   const fetchProfiles = async () => {
     try {
-      setLoading(true);
-      const { data, error } = await supabase
+      if (profiles.length === 0) {
+        setLoading(true);
+      }
+      let query = supabase
         .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+        .select('id, user_id, full_name, avatar_url, year_of_study, expertise, domain, room_number, created_at')
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (user?.id) {
+        query = query.neq('user_id', user.id);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
-      setProfiles(data || []);
+      const list = (data as Profile[]) || [];
+      setProfiles(list);
+      setCached(DIRECTORY_CACHE_KEY, list);
     } catch (error) {
       console.error('Error fetching profiles:', error);
     } finally {
@@ -64,35 +90,37 @@ const Search: React.FC = () => {
   // Distinct courses/departments for filter pills
   const coursePills = ['All', 'CSE', 'IT', 'ECE', 'Mechanical', 'Civil'];
 
-  // Filter profiles based on all criteria
-  const filteredProfiles = profiles.filter((p) => {
-    const query = searchQuery.toLowerCase().trim();
-    
-    // Text search query across all relevant fields
-    const matchesQuery = !query || (
-      (p.full_name && p.full_name.toLowerCase().includes(query)) ||
-      (p.domain && p.domain.toLowerCase().includes(query)) ||
-      (p.expertise && p.expertise.toLowerCase().includes(query)) ||
-      (p.room_number && p.room_number.toLowerCase().includes(query))
-    );
+  // Memoized filtering using deferred query so typing stays 60fps
+  const filteredProfiles = useMemo(() => {
+    const query = deferredQuery.toLowerCase().trim();
+    return profiles.filter((p) => {
+      const matchesQuery = !query || (
+        (p.full_name && p.full_name.toLowerCase().includes(query)) ||
+        (p.domain && p.domain.toLowerCase().includes(query)) ||
+        (p.expertise && p.expertise.toLowerCase().includes(query)) ||
+        (p.room_number && p.room_number.toLowerCase().includes(query))
+      );
 
-    // Course pill filter
-    const matchesCourse = selectedCourse === 'All' || (
-      p.domain && p.domain.toLowerCase().includes(selectedCourse.toLowerCase())
-    );
+      const matchesCourse = selectedCourse === 'All' || (
+        p.domain && p.domain.toLowerCase().includes(selectedCourse.toLowerCase())
+      );
 
-    // Year dropdown filter
-    const matchesYear = selectedYear === 'All' || (
-      p.year_of_study !== null && p.year_of_study.toString() === selectedYear
-    );
+      const matchesYear = selectedYear === 'All' || (
+        p.year_of_study !== null && p.year_of_study.toString() === selectedYear
+      );
 
-    // Room dropdown filter
-    const matchesRoom = selectedRoom === 'All' || (
-      p.room_number && p.room_number.toLowerCase().startsWith(selectedRoom.toLowerCase())
-    );
+      const matchesRoom = selectedRoom === 'All' || (
+        p.room_number && p.room_number.toLowerCase().startsWith(selectedRoom.toLowerCase())
+      );
 
-    return matchesQuery && matchesCourse && matchesYear && matchesRoom;
-  });
+      return matchesQuery && matchesCourse && matchesYear && matchesRoom;
+    });
+  }, [profiles, deferredQuery, selectedCourse, selectedYear, selectedRoom]);
+
+  const visibleProfiles = useMemo(
+    () => filteredProfiles.slice(0, visibleCount),
+    [filteredProfiles, visibleCount]
+  );
 
   const handleMessageClick = (userId: string) => {
     navigate(`/messages/${userId}`);
@@ -214,17 +242,27 @@ const Search: React.FC = () => {
             <div className="w-5 h-5 border-2 border-neutral-300 border-t-neutral-900 rounded-full animate-spin" />
             <span className="text-xs text-neutral-500">Loading directory...</span>
           </div>
-        ) : filteredProfiles.length > 0 ? (
-          filteredProfiles.map((p) => (
+        ) : visibleProfiles.length > 0 ? (
+          <>
+            {visibleProfiles.map((p) => (
             <div
               key={p.id}
               className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-neutral-50/60 transition-colors"
             >
               {/* Resident Info */}
-              <div className="flex items-start gap-3.5 min-w-0">
+              <div
+                onClick={() => navigate(`/profile/${p.user_id}`)}
+                className="flex items-start gap-3.5 min-w-0 cursor-pointer group"
+              >
                 <div className="w-11 h-11 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 flex-shrink-0 mt-0.5">
                   {p.avatar_url ? (
-                    <img src={p.avatar_url} alt={p.full_name || 'Resident'} className="w-full h-full object-cover" />
+                    <img
+                      src={p.avatar_url}
+                      alt={p.full_name || 'Resident'}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     <span>
                       {p.full_name ? p.full_name.charAt(0).toUpperCase() : 'U'}
@@ -234,7 +272,7 @@ const Search: React.FC = () => {
 
                 <div className="min-w-0 space-y-1">
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-neutral-950 truncate">
+                    <h2 className="text-sm font-semibold text-neutral-950 truncate group-hover:underline">
                       {p.full_name || 'Unnamed Resident'}
                     </h2>
                   </div>
@@ -270,7 +308,18 @@ const Search: React.FC = () => {
                 </button>
               </div>
             </div>
-          ))
+            ))}
+            {filteredProfiles.length > visibleCount && (
+              <div className="p-4 text-center bg-neutral-50/40">
+                <button
+                  onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                  className="btn btn-secondary text-xs py-1.5 px-4"
+                >
+                  Show more ({filteredProfiles.length - visibleCount} remaining)
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <div className="p-12 text-center space-y-2">
             <h3 className="text-sm font-semibold text-neutral-950">No residents found</h3>

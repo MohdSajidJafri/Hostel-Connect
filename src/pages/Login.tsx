@@ -6,13 +6,13 @@ import { Eye, EyeOff } from 'lucide-react';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, demoLogin } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authInfo, setAuthInfo] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -24,8 +24,9 @@ const Login: React.FC = () => {
     try {
       setLoading(true);
       setAuthError(null);
+      setAuthInfo(null);
       const redirectUrl = `${window.location.origin}/`;
-      
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -33,14 +34,15 @@ const Login: React.FC = () => {
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
-          }
+          },
         },
       });
 
       if (error) throw error;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error signing in with Google:', error);
-      setAuthError(error.message || 'Error signing in with Google. Please try again.');
+      const message = error instanceof Error ? error.message : 'Error signing in with Google. Please try again.';
+      setAuthError(message);
     } finally {
       setLoading(false);
     }
@@ -53,6 +55,7 @@ const Login: React.FC = () => {
     try {
       setLoading(true);
       setAuthError(null);
+      setAuthInfo(null);
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -60,9 +63,32 @@ const Login: React.FC = () => {
 
       if (error) throw error;
       navigate('/');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error signing in:', error);
-      setAuthError(error.message || 'Invalid email or password.');
+      const message = error instanceof Error ? error.message : 'Invalid email or password.';
+      setAuthError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setAuthError(null);
+    setAuthInfo(null);
+    if (!email.trim()) {
+      setAuthInfo('Enter your email address above first, then click Forgot password to receive a reset link.');
+      return;
+    }
+    try {
+      setLoading(true);
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/login`,
+      });
+      if (error) throw error;
+      setAuthInfo('Password reset link sent. Please check your inbox.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to send reset email. Contact your administrator.';
+      setAuthError(message);
     } finally {
       setLoading(false);
     }
@@ -112,8 +138,13 @@ const Login: React.FC = () => {
             </div>
 
             {authError && (
-              <div className="mb-4 p-3 rounded-md bg-neutral-50 border border-neutral-300 text-neutral-800 text-xs leading-relaxed">
+              <div role="alert" className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-red-800 text-xs leading-relaxed">
                 {authError}
+              </div>
+            )}
+            {authInfo && (
+              <div role="status" className="mb-4 p-3 rounded-md bg-neutral-50 border border-neutral-300 text-neutral-800 text-xs leading-relaxed">
+                {authInfo}
               </div>
             )}
 
@@ -142,6 +173,19 @@ const Login: React.FC = () => {
                 />
               </svg>
               Continue with Google
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                demoLogin();
+                navigate('/', { replace: true });
+              }}
+              disabled={loading}
+              data-testid="demo-login-btn"
+              className="w-full btn btn-primary py-2.5 mt-2.5 flex items-center justify-center gap-2 text-xs font-medium"
+            >
+              Demo Login (Explore App)
             </button>
 
             {/* Subtle Divider */}
@@ -194,19 +238,11 @@ const Login: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between text-xs pt-1">
-                <label className="flex items-center gap-2 cursor-pointer text-neutral-600">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded border-neutral-300 text-neutral-950 focus:ring-neutral-900"
-                  />
-                  <span>Remember me</span>
-                </label>
+              <div className="flex items-center justify-end text-xs pt-1">
                 <button
                   type="button"
-                  onClick={() => alert('Password reset is managed via your university or administrator.')}
+                  onClick={handleForgotPassword}
+                  disabled={loading}
                   className="text-neutral-500 hover:text-neutral-950 transition-colors"
                 >
                   Forgot password?

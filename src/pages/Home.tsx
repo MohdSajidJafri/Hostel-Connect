@@ -2,29 +2,51 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase, Profile } from '../lib/supabase';
+import { DEMO_PROFILES } from '../lib/demoData';
+import { getCached, setCached } from '../lib/cache';
 import { Search, MessageSquare, User, ArrowRight } from 'lucide-react';
 
+const RECENT_CACHE_KEY = 'recent_profiles';
+
 const Home: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, user, isDemo } = useAuth();
   const navigate = useNavigate();
-  const [recentProfiles, setRecentProfiles] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [recentProfiles, setRecentProfiles] = useState<Profile[]>(
+    () => getCached<Profile[]>(RECENT_CACHE_KEY, 60_000) || []
+  );
+  const [loading, setLoading] = useState(() => !getCached<Profile[]>(RECENT_CACHE_KEY, 60_000));
 
   useEffect(() => {
+    if (isDemo) {
+      setRecentProfiles(DEMO_PROFILES.filter((p) => p.user_id !== user?.id).slice(0, 5));
+      setLoading(false);
+      return;
+    }
     fetchRecentProfiles();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemo, user?.id]);
 
   const fetchRecentProfiles = async () => {
     try {
-      setLoading(true);
-      const { data, error } = await supabase
+      if (recentProfiles.length === 0) {
+        setLoading(true);
+      }
+      let query = supabase
         .from('profiles')
-        .select('*')
+        .select('id, user_id, full_name, avatar_url, domain, year_of_study, room_number, created_at')
         .order('created_at', { ascending: false })
         .limit(5);
 
+      if (user?.id) {
+        query = query.neq('user_id', user.id);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
-      setRecentProfiles(data || []);
+      const list = (data as Profile[]) || [];
+      setRecentProfiles(list);
+      setCached(RECENT_CACHE_KEY, list);
     } catch (error) {
       console.error('Error fetching recent profiles:', error);
     } finally {
@@ -178,7 +200,13 @@ const Home: React.FC = () => {
               >
                 <div className="w-12 h-12 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 mb-2.5 group-hover:scale-105 transition-transform">
                   {p.avatar_url ? (
-                    <img src={p.avatar_url} alt={p.full_name || 'Resident'} className="w-full h-full object-cover" />
+                    <img
+                      src={p.avatar_url}
+                      alt={p.full_name || 'Resident'}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     <span>
                       {p.full_name ? p.full_name.charAt(0).toUpperCase() : 'U'}

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
+import { DEMO_MESSAGES_EVENT, getDemoUnreadCount } from '../lib/demoData';
 import { 
   Home, 
   Search, 
@@ -18,11 +20,52 @@ interface AppShellProps {
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const { profile, signOut } = useAuth();
+  const { profile, user, isDemo, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) {
+      setUnreadCount(0);
+      return;
+    }
+
+    if (isDemo) {
+      const syncDemo = () => setUnreadCount(getDemoUnreadCount(user.id));
+      syncDemo();
+      window.addEventListener(DEMO_MESSAGES_EVENT, syncDemo);
+      return () => window.removeEventListener(DEMO_MESSAGES_EVENT, syncDemo);
+    }
+
+    const fetchUnreadCount = async () => {
+      const { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('recipient_id', user.id)
+        .eq('read', false);
+      setUnreadCount(count ?? 0);
+    };
+
+    fetchUnreadCount();
+
+    const channel = supabase
+      .channel(`unread:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages', filter: `recipient_id=eq.${user.id}` },
+        () => {
+          fetchUnreadCount();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [user, isDemo]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -97,7 +140,15 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 {({ isActive }) => (
                   <>
                     <Icon size={16} strokeWidth={isActive ? 2.2 : 1.8} />
-                    <span>{item.label}</span>
+                    <span className="flex-1">{item.label}</span>
+                    {item.path === '/messages' && unreadCount > 0 && (
+                      <span
+                        data-testid="sidebar-unread-badge"
+                        className="px-1.5 py-0.5 text-[10px] font-semibold bg-neutral-950 text-white rounded-full leading-none"
+                      >
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    )}
                   </>
                 )}
               </NavLink>
@@ -174,10 +225,14 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           <div className="flex items-center gap-2">
             <Link
               to="/messages"
-              className="p-2 text-neutral-600 hover:text-neutral-950 hover:bg-neutral-100 rounded-md transition-colors"
+              className="relative p-2 text-neutral-600 hover:text-neutral-950 hover:bg-neutral-100 rounded-md transition-colors"
               title="Messages"
+              aria-label="Messages"
             >
               <MessageSquare size={17} />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-neutral-950 ring-2 ring-white" />
+              )}
             </Link>
             
             <Link
@@ -219,6 +274,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                 </div>
                 <button
                   onClick={() => setMobileMenuOpen(false)}
+                  aria-label="Close menu"
                   className="p-1.5 text-neutral-500 hover:text-neutral-950 rounded-md"
                 >
                   <X size={18} />
@@ -255,7 +311,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                       }
                     >
                       <Icon size={17} />
-                      <span>{item.label}</span>
+                      <span className="flex-1">{item.label}</span>
+                      {item.path === '/messages' && unreadCount > 0 && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-neutral-950 text-white rounded-full leading-none">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
                     </NavLink>
                   );
                 })}
@@ -270,6 +331,14 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
                   <Settings size={16} />
                   <span>Settings</span>
                 </Link>
+                <a
+                  href="mailto:support@hostelconnect.internal"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center gap-3 px-3 py-2 rounded-md text-xs text-neutral-600 hover:bg-neutral-50"
+                >
+                  <HelpCircle size={16} />
+                  <span>Help & Support</span>
+                </a>
                 <button
                   onClick={() => {
                     setMobileMenuOpen(false);

@@ -6,13 +6,22 @@ import { ArrowLeft, Upload, ChevronDown } from 'lucide-react';
 
 const EditProfile: React.FC = () => {
   const navigate = useNavigate();
-  const { user, profile, refreshProfile } = useAuth();
+  const { user, profile, refreshProfile, isDemo, updateDemoProfile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [avatar, setAvatar] = useState<File | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [previewObjectUrl, setPreviewObjectUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+      }
+    };
+  }, [previewObjectUrl]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -57,21 +66,27 @@ const EditProfile: React.FC = () => {
         setErrorMsg('File size must be less than 2MB');
         return;
       }
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+      }
+      const nextUrl = URL.createObjectURL(file);
+      setPreviewObjectUrl(nextUrl);
       setAvatar(file);
-      setAvatarUrl(URL.createObjectURL(file));
+      setAvatarUrl(nextUrl);
       setErrorMsg(null);
     }
   };
 
-  const uploadAvatar = async (): Promise<string | null> => {
-    if (!avatar || !user) return null;
+  const uploadAvatar = async (): Promise<string> => {
+    if (!avatar || !user) {
+      throw new Error('No avatar selected or user not authenticated.');
+    }
 
     try {
       setUploading(true);
 
-      const fileExt = avatar.name.split('.').pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = fileName;
+      const fileExt = avatar.name.split('.').pop() || 'png';
+      const filePath = `${user.id}/${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from('profiles')
@@ -81,10 +96,6 @@ const EditProfile: React.FC = () => {
 
       const { data } = supabase.storage.from('profiles').getPublicUrl(filePath);
       return data.publicUrl;
-    } catch (error: any) {
-      console.error('Error uploading avatar:', error);
-      setErrorMsg('Error uploading avatar: ' + (error.message || ''));
-      return null;
     } finally {
       setUploading(false);
     }
@@ -103,16 +114,33 @@ const EditProfile: React.FC = () => {
       setErrorMsg(null);
       setSuccessMsg(null);
 
-      // Upload avatar if changed
+      // Convert year of study to number if provided
+      const yearOfStudy = formData.yearOfStudy
+        ? parseInt(formData.yearOfStudy, 10)
+        : null;
+
+      if (isDemo) {
+        updateDemoProfile({
+          full_name: formData.fullName,
+          domain: formData.course,
+          year_of_study: yearOfStudy,
+          expertise: formData.expertise,
+          room_number: formData.roomNumber,
+          contact_info: formData.contactInfo,
+          avatar_url: avatarUrl || profile?.avatar_url || null,
+        });
+        setSuccessMsg('Profile updated successfully!');
+        setTimeout(() => {
+          navigate('/profile');
+        }, 400);
+        return;
+      }
+
+      // Upload avatar if changed; throws on failure so we never wipe existing avatar_url
       let newAvatarUrl = profile?.avatar_url || null;
       if (avatar) {
         newAvatarUrl = await uploadAvatar();
       }
-
-      // Convert year of study to number if provided
-      const yearOfStudy = formData.yearOfStudy
-        ? parseInt(formData.yearOfStudy)
-        : null;
 
       // Update profile
       const { error } = await supabase.from('profiles').upsert(
@@ -139,9 +167,10 @@ const EditProfile: React.FC = () => {
       setTimeout(() => {
         navigate('/profile');
       }, 600);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error updating profile:', error);
-      setErrorMsg('Error updating profile: ' + (error.message || ''));
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      setErrorMsg('Error updating profile: ' + msg);
     } finally {
       setLoading(false);
     }

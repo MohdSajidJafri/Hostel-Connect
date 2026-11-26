@@ -13,45 +13,136 @@ CREATE TABLE IF NOT EXISTS profiles (
   updated_at TIMESTAMP WITH TIME ZONE
 );
 
--- Create messages table
+-- Create messages table with safety constraints
 CREATE TABLE IF NOT EXISTS messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   sender_id UUID REFERENCES auth.users(id) NOT NULL,
   recipient_id UUID REFERENCES auth.users(id) NOT NULL,
-  content TEXT NOT NULL,
+  content TEXT NOT NULL CHECK (char_length(trim(content)) BETWEEN 1 AND 2000),
   read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  CHECK (sender_id <> recipient_id)
+);
+
+-- Create blocked_users table for user safety
+CREATE TABLE IF NOT EXISTS blocked_users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  blocker_id UUID REFERENCES auth.users(id) NOT NULL,
+  blocked_id UUID REFERENCES auth.users(id) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (blocker_id, blocked_id),
+  CHECK (blocker_id <> blocked_id)
+);
+
+-- Create message_reports table for moderation/safety
+CREATE TABLE IF NOT EXISTS message_reports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  reporter_id UUID REFERENCES auth.users(id) NOT NULL,
+  reported_user_id UUID REFERENCES auth.users(id) NOT NULL,
+  reason TEXT NOT NULL CHECK (char_length(trim(reason)) BETWEEN 1 AND 500),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Indexes for query performance
+CREATE INDEX IF NOT EXISTS idx_profiles_created_at ON profiles (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_participants_created ON messages (sender_id, recipient_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_recipient_unread ON messages (recipient_id, read) WHERE read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_blocked_users_pair ON blocked_users (blocker_id, blocked_id);
 
 -- Set up Row Level Security (RLS) for profiles
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
--- Allow users to view all profiles
-CREATE POLICY "Profiles are viewable by everyone" ON profiles
-  FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Profiles are viewable by everyone" ON profiles;
+CREATE POLICY "Profiles are viewable by authenticated users" ON profiles
+  FOR SELECT USING (auth.role() = 'authenticated');
 
--- Allow users to update their own profile
 CREATE POLICY "Users can update their own profile" ON profiles
   FOR UPDATE USING (auth.uid() = user_id);
 
--- Allow users to insert their own profile
 CREATE POLICY "Users can insert their own profile" ON profiles
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
 -- Set up Row Level Security (RLS) for messages
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 
--- Allow users to view their own messages
 CREATE POLICY "Users can view their own messages" ON messages
   FOR SELECT USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
 
--- Allow users to insert messages they send
 CREATE POLICY "Users can insert messages they send" ON messages
-  FOR INSERT WITH CHECK (auth.uid() = sender_id);
+  FOR INSERT WITH CHECK (
+    auth.uid() = sender_id
+    AND sender_id <> recipient_id
+    AND NOT EXISTS (
+      SELECT 1 FROM blocked_users b
+      WHERE (b.blocker_id = recipient_id AND b.blocked_id = auth.uid())
+         OR (b.blocker_id = auth.uid() AND b.blocked_id = recipient_id)
+    )
+  );
 
--- Allow users to update messages they received (for marking as read)
 CREATE POLICY "Users can update messages they received" ON messages
   FOR UPDATE USING (auth.uid() = recipient_id);
+
+CREATE POLICY "Users can delete their own messages or conversations" ON messages
+  FOR DELETE USING (auth.uid() = sender_id OR auth.uid() = recipient_id);
+
+-- RLS for blocked_users
+ALTER TABLE blocked_users ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own blocks" ON blocked_users
+  FOR SELECT USING (auth.uid() = blocker_id OR auth.uid() = blocked_id);
+
+CREATE POLICY "Users can block other users" ON blocked_users
+  FOR INSERT WITH CHECK (auth.uid() = blocker_id AND blocker_id <> blocked_id);
+
+CREATE POLICY "Users can unblock users they blocked" ON blocked_users
+  FOR DELETE USING (auth.uid() = blocker_id);
+
+-- RLS for message_reports
+ALTER TABLE message_reports ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can submit reports" ON message_reports
+  FOR INSERT WITH CHECK (auth.uid() = reporter_id);
+
+CREATE POLICY "Users can view their own reports" ON message_reports
+  FOR SELECT USING (auth.uid() = reporter_id);
+
+-- Enable Realtime on messages table
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'messages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE messages;
+  END IF;
+END $$;
+
+-- Storage bucket & policies for profile avatars
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('profiles', 'profiles', true)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY "Avatar images are publicly accessible" ON storage.objects
+  FOR SELECT USING (bucket_id = 'profiles');
+
+CREATE POLICY "Authenticated users can upload their own avatar" ON storage.objects
+  FOR INSERT WITH CHECK (
+    bucket_id = 'profiles'
+    AND auth.role() = 'authenticated'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+CREATE POLICY "Users can update their own avatar" ON storage.objects
+  FOR UPDATE USING (
+    bucket_id = 'profiles'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+CREATE POLICY "Users can delete their own avatar" ON storage.objects
+  FOR DELETE USING (
+    bucket_id = 'profiles'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 -- Create a function to create a profile after user signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()

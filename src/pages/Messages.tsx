@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
+import {
+  DEMO_MESSAGES_EVENT,
+  DEMO_PROFILES,
+  getDemoMessages,
+  saveDemoMessages,
+} from '../lib/demoData';
+import { getCached, setCached } from '../lib/cache';
 import { format, isToday, isYesterday } from 'date-fns';
 import { Plus, Search as SearchIcon, Trash2, MessageSquare, ArrowRight } from 'lucide-react';
 
@@ -11,44 +18,104 @@ type Conversation = {
   avatar_url: string | null;
   last_message: string;
   last_message_time: string;
-  unread: boolean;
+  unread_count: number;
 };
 
 const Messages: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isDemo } = useAuth();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const cacheKey = user ? `inbox_${user.id}` : '';
+  const [conversations, setConversations] = useState<Conversation[]>(
+    () => (cacheKey ? getCached<Conversation[]>(cacheKey, 30_000) || [] : [])
+  );
+  const [loading, setLoading] = useState(
+    () => !(cacheKey && getCached<Conversation[]>(cacheKey, 30_000))
+  );
   const [searchQuery, setSearchQuery] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const loadDemoConversations = () => {
+    if (!user) return;
+    const msgs = getDemoMessages();
+    const convMap = new Map<string, Conversation>();
+    for (const m of [...msgs].sort((a, b) => b.created_at.localeCompare(a.created_at))) {
+      const otherId = m.sender_id === user.id ? m.recipient_id : m.sender_id;
+      const isUnread = m.recipient_id === user.id && !m.read;
+      const existing = convMap.get(otherId);
+      if (!existing) {
+        const p = DEMO_PROFILES.find((prof) => prof.user_id === otherId);
+        convMap.set(otherId, {
+          user_id: otherId,
+          full_name: p?.full_name || 'Resident',
+          avatar_url: p?.avatar_url || null,
+          last_message: m.content,
+          last_message_time: m.created_at,
+          unread_count: isUnread ? 1 : 0,
+        });
+      } else if (isUnread) {
+        existing.unread_count += 1;
+      }
+    }
+    setConversations(Array.from(convMap.values()));
+    setLoading(false);
+  };
 
   useEffect(() => {
-    if (user) {
-      fetchConversations();
+    if (!user) return;
+
+    if (isDemo) {
+      loadDemoConversations();
+      window.addEventListener(DEMO_MESSAGES_EVENT, loadDemoConversations);
+      return () => window.removeEventListener(DEMO_MESSAGES_EVENT, loadDemoConversations);
     }
-  }, [user]);
+
+    fetchConversations();
+
+    const channel = supabase
+      .channel(`inbox:${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages', filter: `recipient_id=eq.${user.id}` },
+        () => fetchConversations()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'messages', filter: `sender_id=eq.${user.id}` },
+        () => fetchConversations()
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isDemo]);
 
   const fetchConversations = async () => {
     if (!user) return;
 
     try {
-      setLoading(true);
+      if (conversations.length === 0) {
+        setLoading(true);
+      }
 
-      // Fetch all messages involving the current user
       const { data: messages, error: messagesError } = await supabase
         .from('messages')
-        .select('*')
+        .select('id, sender_id, recipient_id, content, read, created_at')
         .or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(200);
 
       if (messagesError) throw messagesError;
 
       if (!messages || messages.length === 0) {
         setConversations([]);
+        setCached(cacheKey, []);
         setLoading(false);
         return;
       }
 
-      // Get unique conversational partner IDs
       const userIds = [
         ...new Set(
           messages.map((msg) =>
@@ -57,15 +124,13 @@ const Messages: React.FC = () => {
         ),
       ];
 
-      // Fetch partner profiles
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('user_id, full_name, avatar_url')
         .in('user_id', userIds);
 
       if (profilesError) throw profilesError;
 
-      // Group into conversations
       const conversationMap = new Map<string, Conversation>();
 
       for (const message of messages) {
@@ -73,22 +138,27 @@ const Messages: React.FC = () => {
           message.sender_id === user.id
             ? message.recipient_id
             : message.sender_id;
+        const isUnread = message.recipient_id === user.id && !message.read;
 
-        if (!conversationMap.has(otherUserId)) {
+        const existing = conversationMap.get(otherUserId);
+        if (!existing) {
           const profile = profiles?.find((p) => p.user_id === otherUserId);
-
           conversationMap.set(otherUserId, {
             user_id: otherUserId,
             full_name: profile?.full_name || 'Resident',
             avatar_url: profile?.avatar_url || null,
             last_message: message.content,
             last_message_time: message.created_at,
-            unread: message.recipient_id === user.id && !message.read,
+            unread_count: isUnread ? 1 : 0,
           });
+        } else if (isUnread) {
+          existing.unread_count += 1;
         }
       }
 
-      setConversations(Array.from(conversationMap.values()));
+      const list = Array.from(conversationMap.values());
+      setConversations(list);
+      setCached(cacheKey, list);
     } catch (error) {
       console.error('Error fetching conversations:', error);
     } finally {
@@ -99,13 +169,9 @@ const Messages: React.FC = () => {
   const formatMessageTime = (timestamp: string) => {
     try {
       const date = new Date(timestamp);
-      if (isToday(date)) {
-        return format(date, 'h:mm a');
-      } else if (isYesterday(date)) {
-        return 'Yesterday';
-      } else {
-        return format(date, 'MMM d');
-      }
+      if (isToday(date)) return format(date, 'h:mm a');
+      if (isYesterday(date)) return 'Yesterday';
+      return format(date, 'MMM d');
     } catch {
       return '';
     }
@@ -118,8 +184,22 @@ const Messages: React.FC = () => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (!window.confirm('Delete this conversation?')) return;
+    if (confirmDeleteId !== otherUserId) {
+      setConfirmDeleteId(otherUserId);
+      return;
+    }
     if (!user) return;
+    setErrorMsg(null);
+    setConfirmDeleteId(null);
+
+    if (isDemo) {
+      const remaining = getDemoMessages().filter(
+        (m) => !(m.sender_id === otherUserId || m.recipient_id === otherUserId)
+      );
+      saveDemoMessages(remaining);
+      setConversations((prev) => prev.filter((conv) => conv.user_id !== otherUserId));
+      return;
+    }
 
     try {
       const { error } = await supabase
@@ -133,11 +213,10 @@ const Messages: React.FC = () => {
       setConversations((prev) => prev.filter((conv) => conv.user_id !== otherUserId));
     } catch (error) {
       console.error('Error deleting conversation:', error);
-      alert('Failed to delete conversation.');
+      setErrorMsg('Failed to delete conversation. Please try again.');
     }
   };
 
-  // Filter conversations by search input
   const filteredConversations = conversations.filter((c) =>
     (c.full_name && c.full_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
     (c.last_message && c.last_message.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -164,9 +243,14 @@ const Messages: React.FC = () => {
         </Link>
       </div>
 
+      {errorMsg && (
+        <div role="alert" className="p-3 bg-red-50 border border-red-200 rounded-md text-xs text-red-800">
+          {errorMsg}
+        </div>
+      )}
+
       {/* Conversation List Container */}
       <div className="bg-white border border-neutral-200 rounded-xl shadow-subtle overflow-hidden">
-        {/* Search Conversations Input */}
         {conversations.length > 0 && (
           <div className="p-3 border-b border-neutral-100 relative">
             <SearchIcon
@@ -190,68 +274,94 @@ const Messages: React.FC = () => {
           </div>
         ) : filteredConversations.length > 0 ? (
           <div className="divide-y divide-neutral-100">
-            {filteredConversations.map((c) => (
-              <div
-                key={c.user_id}
-                onClick={() => navigate(`/messages/${c.user_id}`)}
-                className={`group px-4 py-3.5 sm:px-5 sm:py-4 flex items-center justify-between gap-4 hover:bg-neutral-50 cursor-pointer transition-colors ${
-                  c.unread ? 'bg-neutral-50/70' : 'bg-white'
-                }`}
-              >
-                {/* Avatar + Content */}
-                <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                  <div className="w-10 h-10 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 flex-shrink-0">
-                    {c.avatar_url ? (
-                      <img
-                        src={c.avatar_url}
-                        alt={c.full_name || 'Resident'}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span>
-                        {c.full_name ? c.full_name.charAt(0).toUpperCase() : 'U'}
-                      </span>
-                    )}
-                  </div>
+            {filteredConversations.map((c) => {
+              const hasUnread = c.unread_count > 0;
+              return (
+                <div
+                  key={c.user_id}
+                  onClick={() => navigate(`/messages/${c.user_id}`)}
+                  className={`group px-4 py-3.5 sm:px-5 sm:py-4 flex items-center justify-between gap-4 hover:bg-neutral-50 cursor-pointer transition-colors ${
+                    hasUnread ? 'bg-neutral-50/70' : 'bg-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                    <div className="w-10 h-10 rounded-full bg-neutral-100 border border-neutral-200 overflow-hidden flex items-center justify-center text-xs font-semibold text-neutral-800 flex-shrink-0">
+                      {c.avatar_url ? (
+                        <img
+                          src={c.avatar_url}
+                          alt={c.full_name || 'Resident'}
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span>
+                          {c.full_name ? c.full_name.charAt(0).toUpperCase() : 'U'}
+                        </span>
+                      )}
+                    </div>
 
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <h2
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <h2
+                          className={`text-xs truncate ${
+                            hasUnread ? 'font-semibold text-neutral-950' : 'font-medium text-neutral-900'
+                          }`}
+                        >
+                          {c.full_name}
+                        </h2>
+                        <span className="text-[11px] text-neutral-400 flex-shrink-0">
+                          {formatMessageTime(c.last_message_time)}
+                        </span>
+                      </div>
+                      <p
                         className={`text-xs truncate ${
-                          c.unread ? 'font-semibold text-neutral-950' : 'font-medium text-neutral-900'
+                          hasUnread ? 'font-medium text-neutral-900' : 'text-neutral-500'
                         }`}
                       >
-                        {c.full_name}
-                      </h2>
-                      <span className="text-[11px] text-neutral-400 flex-shrink-0">
-                        {formatMessageTime(c.last_message_time)}
-                      </span>
+                        {c.last_message}
+                      </p>
                     </div>
-                    <p
-                      className={`text-xs truncate ${
-                        c.unread ? 'font-medium text-neutral-900' : 'text-neutral-500'
-                      }`}
-                    >
-                      {c.last_message}
-                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {hasUnread && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-neutral-950 text-white rounded-full leading-none">
+                        {c.unread_count}
+                      </span>
+                    )}
+                    {confirmDeleteId === c.user_id ? (
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={(e) => handleDeleteConversation(e, c.user_id)}
+                          className="px-2 py-1 text-[11px] font-medium bg-red-600 text-white rounded hover:bg-red-700"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDeleteId(null);
+                          }}
+                          className="px-2 py-1 text-[11px] text-neutral-600 hover:text-neutral-950 rounded"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={(e) => handleDeleteConversation(e, c.user_id)}
+                        aria-label="Delete conversation"
+                        className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity p-1.5 text-neutral-400 hover:text-neutral-950 hover:bg-neutral-200/60 rounded"
+                        title="Delete conversation"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
-
-                {/* Right Metadata & Delete Hover Action */}
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {c.unread && (
-                    <span className="w-2 h-2 rounded-full bg-neutral-950" />
-                  )}
-                  <button
-                    onClick={(e) => handleDeleteConversation(e, c.user_id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 text-neutral-400 hover:text-neutral-950 hover:bg-neutral-200/60 rounded"
-                    title="Delete conversation"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="p-16 text-center space-y-3">
@@ -276,4 +386,3 @@ const Messages: React.FC = () => {
 };
 
 export default Messages;
-
