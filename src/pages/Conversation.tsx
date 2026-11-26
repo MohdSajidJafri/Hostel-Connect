@@ -31,6 +31,8 @@ import {
   Search,
   Paperclip,
   Bell,
+  Smile,
+  ExternalLink,
 } from 'lucide-react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -54,6 +56,62 @@ type UserProfile = {
 const MAX_MESSAGE_LENGTH = 2000;
 const RATE_LIMIT_COUNT = 5;
 const RATE_LIMIT_WINDOW_MS = 5000;
+const QUICK_EMOJIS = [
+  '👋', '😊', '😂', '❤️', '🔥', '👍', '🙌', '🎉',
+  '💻', '📚', '☕', '🚀', '✅', '🙏', '🤝', '💡',
+  '😎', '🤔', '😭', '🥳', '⚡', '🎯', '📌', '🏠',
+];
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '🔥', '👏'];
+
+function isEmojiOnly(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 12) return false;
+  return /^(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}|\uFE0F|\u200D|\s){1,5}$/u.test(trimmed);
+}
+
+function extractFirstUrl(text: string): { url: string; host: string } | null {
+  const match = text.match(/https?:\/\/[^\s<>"']+/i);
+  if (!match) return null;
+  try {
+    const parsed = new URL(match[0]);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return { url: parsed.toString(), host: parsed.hostname.replace(/^www\./, '') };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function renderMessageWithLinks(text: string, isMine: boolean): React.ReactNode {
+  const parts = text.split(/(https?:\/\/[^\s<>"']+)/gi);
+  return parts.map((part, i) => {
+    if (/^https?:\/\//i.test(part)) {
+      try {
+        const parsed = new URL(part);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          return (
+            <a
+              key={i}
+              href={parsed.toString()}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className={`underline underline-offset-2 break-all ${
+                isMine ? 'text-sky-300 hover:text-white' : 'text-neutral-950 hover:text-neutral-600'
+              }`}
+            >
+              {part}
+            </a>
+          );
+        }
+      } catch {
+        return part;
+      }
+    }
+    return part;
+  });
+}
 
 const Conversation: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
@@ -84,6 +142,8 @@ const Conversation: React.FC = () => {
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [notifEnabled, setNotifEnabled] = useState(
     () => typeof Notification !== 'undefined' && Notification.permission === 'granted'
   );
@@ -399,6 +459,7 @@ const Conversation: React.FC = () => {
 
     setNewMessage('');
     setAttachmentFile(null);
+    setEmojiOpen(false);
     if (composerRef.current) {
       composerRef.current.style.height = 'auto';
     }
@@ -520,6 +581,32 @@ const Conversation: React.FC = () => {
     } finally {
       setSubmittingReport(false);
     }
+  };
+
+  const insertEmoji = (emoji: string) => {
+    const el = composerRef.current;
+    if (!el) {
+      setNewMessage((prev) => `${prev}${emoji}`);
+      return;
+    }
+    const start = el.selectionStart ?? newMessage.length;
+    const end = el.selectionEnd ?? newMessage.length;
+    const next = `${newMessage.slice(0, start)}${emoji}${newMessage.slice(end)}`;
+    setNewMessage(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + emoji.length;
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  const toggleReaction = (messageId: string, emoji: string) => {
+    setReactions((prev) => {
+      const current = prev[messageId] || [];
+      const exists = current.includes(emoji);
+      const next = exists ? current.filter((e) => e !== emoji) : [...current, emoji];
+      return { ...prev, [messageId]: next };
+    });
   };
 
   const formatMessageTime = (timestamp: string) => {
@@ -811,9 +898,56 @@ const Conversation: React.FC = () => {
                           />
                         </a>
                       )}
-                      <p className="text-xs leading-relaxed break-words whitespace-pre-wrap">
-                        {m.content}
-                      </p>
+                      {(() => {
+                        const emojiLarge = !m.attachment_url && isEmojiOnly(m.content);
+                        const linkMeta = extractFirstUrl(m.content);
+                        const msgReactions = reactions[m.id] || [];
+                        return (
+                          <>
+                            <p
+                              className={`${
+                                emojiLarge ? 'text-2xl leading-snug' : 'text-xs leading-relaxed'
+                              } break-words whitespace-pre-wrap`}
+                            >
+                              {renderMessageWithLinks(m.content, isMine)}
+                            </p>
+                            {linkMeta && (
+                              <a
+                                href={linkMeta.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                data-testid="message-link-card"
+                                className={`mt-1.5 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] transition-colors ${
+                                  isMine
+                                    ? 'bg-neutral-900 border-neutral-700 text-neutral-200 hover:bg-neutral-800'
+                                    : 'bg-neutral-50 border-neutral-200 text-neutral-700 hover:bg-neutral-100'
+                                }`}
+                              >
+                                <span className="truncate font-medium">{linkMeta.host}</span>
+                                <ExternalLink size={11} className="flex-shrink-0 opacity-70" />
+                              </a>
+                            )}
+                            {msgReactions.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {msgReactions.map((r) => (
+                                  <button
+                                    key={r}
+                                    type="button"
+                                    onClick={() => toggleReaction(m.id, r)}
+                                    className={`text-[11px] px-1.5 py-0.5 rounded-full border ${
+                                      isMine
+                                        ? 'bg-neutral-800 border-neutral-700 text-white'
+                                        : 'bg-neutral-100 border-neutral-200 text-neutral-800'
+                                    }`}
+                                  >
+                                    {r}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                       <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] text-neutral-400">
                         <span>{formatMessageTime(m.created_at)}</span>
                         {isMine && (
@@ -843,6 +977,19 @@ const Conversation: React.FC = () => {
                         isMine ? 'mr-1.5 order-first' : 'ml-1.5'
                       }`}
                     >
+                      <div className="hidden sm:flex items-center bg-white border border-neutral-200 rounded-full px-1 py-0.5 shadow-subtle mr-0.5">
+                        {REACTION_EMOJIS.map((em) => (
+                          <button
+                            key={em}
+                            type="button"
+                            onClick={() => toggleReaction(m.id, em)}
+                            className="text-xs px-1 hover:scale-125 transition-transform"
+                            title={`React ${em}`}
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </div>
                       <button
                         onClick={() => handleCopyMessage(m.id, m.content)}
                         aria-label="Copy message"
@@ -916,8 +1063,40 @@ const Conversation: React.FC = () => {
       ) : (
         <form
           onSubmit={handleSendMessage}
-          className="p-3 bg-white border-t border-neutral-200 space-y-2"
+          className="p-3 bg-white border-t border-neutral-200 space-y-2 relative"
         >
+          {emojiOpen && (
+            <div
+              data-testid="emoji-picker-popover"
+              className="absolute bottom-16 left-3 z-30 w-64 p-2.5 bg-white border border-neutral-200 rounded-xl shadow-dropdown"
+            >
+              <div className="flex items-center justify-between mb-1.5 px-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                  Emojis
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setEmojiOpen(false)}
+                  className="text-neutral-400 hover:text-neutral-900 p-0.5"
+                  aria-label="Close emoji picker"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+              <div className="grid grid-cols-8 gap-1">
+                {QUICK_EMOJIS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => insertEmoji(emoji)}
+                    className="h-7 w-7 flex items-center justify-center rounded hover:bg-neutral-100 text-base transition-colors"
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {attachmentFile && (
             <div className="flex items-center justify-between px-2.5 py-1.5 bg-neutral-50 border border-neutral-200 rounded text-xs text-neutral-700">
               <span className="truncate">Attached: {attachmentFile.name}</span>
@@ -947,6 +1126,20 @@ const Conversation: React.FC = () => {
                 setAttachmentFile(file);
               }}
             />
+            <button
+              type="button"
+              onClick={() => setEmojiOpen((v) => !v)}
+              aria-label="Open emoji picker"
+              data-testid="emoji-picker-btn"
+              className={`p-2.5 rounded-md transition-colors flex-shrink-0 ${
+                emojiOpen
+                  ? 'bg-neutral-950 text-white'
+                  : 'text-neutral-500 hover:text-neutral-950 hover:bg-neutral-100'
+              }`}
+              title="Insert emoji"
+            >
+              <Smile size={15} />
+            </button>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
